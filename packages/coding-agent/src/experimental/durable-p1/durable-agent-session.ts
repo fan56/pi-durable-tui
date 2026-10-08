@@ -47,8 +47,14 @@ import {
 import { Subagent } from "../durable/subagent.ts";
 import { DurableEventAdapter } from "./event-adapter.ts";
 import { bindHeadlessInternals, type HeadlessSessionContract } from "./headless-session.ts";
-import { selectP1Session } from "./session-location.ts";
-import { updateMeta, writeInitialMeta } from "./session-meta.ts";
+import { selectP1Session, selectP1SessionById } from "./session-location.ts";
+import {
+	getCurrentP1SessionId,
+	readMeta,
+	setCurrentP1SessionId,
+	updateMeta,
+	writeInitialMeta,
+} from "./session-meta.ts";
 import { createStableToolBridge } from "./tool-bridge.ts";
 import { rebuildTranscript } from "./transcript-rebuild.ts";
 
@@ -57,6 +63,8 @@ export interface DurableP1SessionOptions {
 	cwd: string;
 	/** Attach the newest existing session for cwd instead of creating one. */
 	continueSession: boolean;
+	/** Attach one specific session by its directory id (overrides continueSession). */
+	sessionId?: string;
 	/** Explicit provider/model override (mirrors stable --provider/--model). */
 	model?: { provider?: string; model: string };
 	/** Skip loading user/project extensions entirely (stable --no-extensions). */
@@ -68,6 +76,8 @@ export interface DurableP1SessionOptions {
 export interface DurableP1Session {
 	session: AgentSession;
 	services: AgentSessionServices;
+	/** From createAgentSessionFromServices; the runtime factory must return it. */
+	extensionsResult: unknown;
 	modelFallbackMessage: string | undefined;
 	/** A factory that throws: /new, /resume, /fork, and import stay out of v0.1 scope. */
 	throwingRuntimeFactory: () => Promise<never>;
@@ -82,7 +92,10 @@ interface QueuedInput {
 
 export async function createDurableP1Session(options: DurableP1SessionOptions): Promise<DurableP1Session> {
 	const context = BACKGROUND_CONTEXT;
-	const location = await selectP1Session(options.cwd, options.continueSession);
+	const location =
+		options.sessionId === undefined
+			? await selectP1Session(options.cwd, options.continueSession)
+			: await selectP1SessionById(options.cwd, options.sessionId);
 	let closed = false;
 	let target: AgentSession | undefined;
 	let harnessClose: (() => Promise<void>) | undefined;
@@ -163,7 +176,10 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 			? undefined
 			: rebuildTranscript(String(root.id), location.cwd, (await root.context(context)).entries);
 		const sessionManager: SessionManager = location.created
-			? SessionManager.inMemory(location.cwd)
+			? // One identity everywhere: the stable manager's session id IS the
+				// durable conversation id, so extensions can recognize the current
+				// session via ctx.sessionManager.getSessionId() against the sidecar.
+				SessionManager.inMemory(location.cwd, { id: String(root.id) })
 			: SessionManager.inMemory(location.cwd, {}, rebuilt!.fileEntries);
 		if (rebuilt !== undefined) {
 			for (const [durableId, sessionId] of rebuilt.idMap) durableIdToSessionId.set(durableId, sessionId);
@@ -178,7 +194,11 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 		target = created.session;
 		const session = target;
 		const internals: HeadlessSessionContract = bindHeadlessInternals(target);
+		setCurrentP1SessionId(location.id);
 		await writeInitialMeta(location);
+		// The title latch must be durable, not per-facade-instance: switching
+		// back to an old session and prompting must not overwrite its title.
+		let titleRecorded = (await readMeta(location.directory))?.title !== undefined;
 		// Extension-driven pi.sendMessage would race the durable engine on the
 		// same SessionManager; refuse it loudly instead (oldfox review #3).
 		if (!internals.guardExtensionLlmCalls()) {
@@ -204,7 +224,6 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 		let compacting = false;
 		let abortRequested = false;
 		let runStarts = 0;
-		let titleRecorded = false;
 		// Manual compaction: the compact() override materializes the result
 		// itself; the ingest path must not double-append.
 		let manualCompaction = false;
@@ -651,6 +670,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 		return {
 			session: proxy,
 			services,
+			extensionsResult: created.extensionsResult,
 			modelFallbackMessage: initial.fallbackMessage,
 			throwingRuntimeFactory,
 			close: closeDurable,

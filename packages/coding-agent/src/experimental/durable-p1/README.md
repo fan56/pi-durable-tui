@@ -1,4 +1,4 @@
-# durable-p1 (v0.2)
+# durable-p1 (v0.4)
 
 The stable interactive-mode TUI (`packages/coding-agent/src/modes/interactive/`,
 unmodified) running on the durable backend (`@earendil-works/pi-durable`
@@ -37,6 +37,7 @@ session (`session.sqlite` + `session.json` sidecar), `proper-lockfile` locked.
 | `transcript-rebuild.ts` | durable active entries → `SessionManager` entry chain, so `--continue` renders history |
 | `session-location.ts` | session directories + locks under the isolated p1 root |
 | `session-meta.ts` | `session.json` sidecars: identity, `/name` persistence, `--list` |
+| `sessions-extension.ts` | v0.4: the `/sessions` picker — lists sidecars, excludes the current session, pre-validates the target's lock, switches through a carrier path the runtime factory resolves |
 
 Tests: `packages/coding-agent/test/durable-p1-*.test.ts` (vitest).
 Typecheck: `npx tsc -p tsconfig.p1check.json` from the repo root.
@@ -51,6 +52,14 @@ continues), subagent tool (task-owned child conversation), and
 **pi-powerline-footer fully green** as the v0.1 acceptance sample (footer
 segments, cwd-border editor, last-request widget, thinking-level segment).
 
+v0.4: **session management** — `/new` (runtime factory creates a fresh durable
+session), `/sessions` picker (newest first, titles from the first prompt,
+current session excluded via a process-env channel — jiti gives extensions
+their own module instances, so module state is invisible to them; switch
+pre-validates the target before the runtime tears the live session down, a
+rule borrowed from dsh-tui-pi), `--session <id>` direct attach, and `/resume`
+over stable JSONL refused with a clear error.
+
 v0.2: **stable MCP reuse end-to-end** — hand-written stdio MCP server
 (echo/add) via `.pi/mcp.json` (`"exposure": "direct"`), model calls
 `mcp__echo-test__add(17,26)` → `43` through the bridge; `/mcp` management
@@ -59,7 +68,9 @@ from the facade prompt path.
 
 ## Not wired (by design, per the phasing)
 
-`/new`, `/resume`, `/fork`, import (v0.4 session management); images;
+`/fork` and `/tree` (durable forks are new conversations in another store;
+the cross-store mapping needs its own design), import; stable-JSONL `/resume`
+(refused, use `/sessions`); images;
 `/login`; extension `tool_result` events (stable emits them from the real
 tool pipeline only — harmless for pure-UI extensions); prompt templates and
 `/skill:name` expansion; MCP exposure modes other than `direct` (codemode /

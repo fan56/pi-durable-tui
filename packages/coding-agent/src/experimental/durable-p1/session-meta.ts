@@ -22,12 +22,31 @@ export interface P1SessionMeta {
 
 const SESSION_DIR_PATTERN = /^\d{13}-[0-9a-f-]{36}$/u;
 
+/** The session this process currently has open, for pickers to exclude. */
+let currentP1SessionId: string | undefined;
+
+export function getCurrentP1SessionId(): string | undefined {
+	return currentP1SessionId;
+}
+
+export function setCurrentP1SessionId(id: string | undefined): void {
+	currentP1SessionId = id;
+	// Extensions load through jiti and get their own module instances, so the
+	// module variable above is invisible to them; the process env is the one
+	// shared channel (single-process by the session lock).
+	if (id === undefined) delete process.env.PI_DURABLE_SESSION_ID;
+	else process.env.PI_DURABLE_SESSION_ID = id;
+}
+
 export function metaPath(directory: string): string {
 	return join(directory, "session.json");
 }
 
 /** Create the sidecar for a fresh session; never throws into the boot path. */
 export async function writeInitialMeta(location: P1SessionLocation): Promise<void> {
+	// Never clobber: reattaching (via /sessions or --session) must keep the
+	// recorded title/name/createdAt of the existing session.
+	if ((await readMeta(location.directory)) !== undefined) return;
 	const meta: P1SessionMeta = {
 		id: location.id,
 		cwd: location.cwd,

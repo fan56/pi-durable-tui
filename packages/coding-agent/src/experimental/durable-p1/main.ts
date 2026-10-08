@@ -12,16 +12,33 @@
 
 import { realpathSync } from "node:fs";
 import { setCapabilityOverrides } from "@earendil-works/pi-tui";
-import { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
+import {
+	AgentSessionRuntime,
+	type CreateAgentSessionRuntimeFactory,
+	type CreateAgentSessionRuntimeResult,
+} from "../../core/agent-session-runtime.ts";
 import { InteractiveMode } from "../../modes/interactive/interactive-mode.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "../../modes/interactive/theme/theme.ts";
 import { validateThemeJson } from "../../modes/interactive/theme/theme-json.ts";
 import { createDurableP1Session } from "./durable-agent-session.ts";
 import { p1SessionsRoot } from "./session-location.ts";
 import { listSessions } from "./session-meta.ts";
+import { durableIdFromCarrierPath } from "./sessions-extension.ts";
+
+type P1 = Awaited<ReturnType<typeof createDurableP1Session>>;
+function toRuntimeResult(p1: P1): CreateAgentSessionRuntimeResult {
+	return {
+		session: p1.session,
+		extensionsResult: p1.extensionsResult as CreateAgentSessionRuntimeResult["extensionsResult"],
+		modelFallbackMessage: p1.modelFallbackMessage,
+		services: p1.services,
+		diagnostics: [],
+	};
+}
 
 interface P1Args {
 	continueSession: boolean;
+	sessionId: string | undefined;
 	provider: string | undefined;
 	model: string | undefined;
 	noExtensions: boolean;
@@ -32,6 +49,7 @@ interface P1Args {
 function parseArgs(argv: readonly string[]): P1Args {
 	const args: P1Args = {
 		continueSession: false,
+		sessionId: undefined,
 		provider: undefined,
 		model: undefined,
 		noExtensions: false,
@@ -67,13 +85,16 @@ function parseArgs(argv: readonly string[]): P1Args {
 			case "-e":
 				args.extraExtensions.push(value());
 				break;
+			case "--session":
+				args.sessionId = value();
+				break;
 			case "--list":
 				args.list = true;
 				break;
 			case "--help":
 			case "-h":
 				process.stdout.write(
-					"usage: main.ts [--continue|-c] [--provider P --model M] [--no-extensions|-ne] [-e PATH]... [--list]\n",
+					"usage: main.ts [--continue|-c] [--session ID] [--provider P --model M] [--no-extensions|-ne] [-e PATH]... [--list]\n",
 				);
 				process.exit(0);
 				break;
@@ -106,12 +127,23 @@ if (args.list) {
 	process.exit(0);
 }
 
-const p1 = await createDurableP1Session({
+const sessionFlags = {
 	cwd,
-	continueSession: args.continueSession,
-	...(args.model === undefined ? {} : { model: { ...(args.provider ? { provider: args.provider } : {}), model: args.model } }),
+	...(args.model === undefined
+		? {}
+		: { model: { ...(args.provider ? { provider: args.provider } : {}), model: args.model } }),
 	...(args.noExtensions ? { noExtensions: true } : {}),
-	...(args.extraExtensions.length > 0 ? { extraExtensions: args.extraExtensions } : {}),
+	// The /sessions picker ships with the entry itself; explicit CLI paths
+	// (and even --no-extensions) keep it loaded.
+	extraExtensions: [
+		...(args.extraExtensions.length > 0 ? args.extraExtensions : []),
+		new URL("./sessions-extension.ts", import.meta.url).pathname,
+	],
+};
+const p1 = await createDurableP1Session({
+	...sessionFlags,
+	continueSession: args.continueSession,
+	...(args.sessionId === undefined ? {} : { sessionId: args.sessionId }),
 });
 setThemeJsonValidator(validateThemeJson);
 initTheme(p1.services.settingsManager.getTheme(), true);
@@ -120,7 +152,29 @@ for (const diagnostic of p1.services.diagnostics) {
 	if (diagnostic.type !== "info") console.error(`[durable-p1] ${diagnostic.type}: ${diagnostic.message}`);
 }
 
-const runtime = new AgentSessionRuntime(p1.session, p1.services, p1.throwingRuntimeFactory);
+// The real runtime factory: /new and the /sessions picker switch durable
+// sessions through it (v0.4). The stock stable-session paths (/resume over
+// JSONL, cross-store /fork and import) refuse with a clear error instead of
+// silently creating an unrelated durable session.
+const runtimeFactory: CreateAgentSessionRuntimeFactory = async (options) => {
+	const reason = options.sessionStartEvent?.reason;
+	if (reason === "resume") {
+		const file = options.sessionManager.getSessionFile();
+		const id = durableIdFromCarrierPath(file ?? "", options.cwd);
+		if (id === undefined) {
+			throw new Error(
+				"durable-p1: switching to non-durable sessions is not supported here — use /sessions to pick a durable session",
+			);
+		}
+		return toRuntimeResult(await createDurableP1Session({ ...sessionFlags, continueSession: false, sessionId: id }));
+	}
+	if (reason === "fork") {
+		throw new Error("durable-p1: cross-store fork is not supported yet (planned)");
+	}
+	// "new": a fresh durable session directory.
+	return toRuntimeResult(await createDurableP1Session({ ...sessionFlags, continueSession: false }));
+};
+const runtime = new AgentSessionRuntime(p1.session, p1.services, runtimeFactory);
 try {
 	const interactiveMode = new InteractiveMode(runtime, { modelFallbackMessage: p1.modelFallbackMessage });
 	await interactiveMode.run();

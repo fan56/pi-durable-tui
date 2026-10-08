@@ -35,6 +35,8 @@ title: pi-durable-coding-agent
 
 ## Resolved after charting（2026-10-08 晚，用户改向）
 
+- **v0.4 会话管理提前落地核心（2026-10-08 深夜，用户拍板「做」）**：/new + /sessions picker + --session 直达已实现并 e2e 验收（13 场景全绿）；fork/tree/导入导出仍开放（durable fork 跨 storage，需单独设计票）。
+
 - **发布形态 bin 名**：定为 `pi-durable`（本机 launcher `~/.local/bin/pi-durable`）。
 - **分期收缩**：v0.2「扩展全线」作废——用户拍板只保 pi-powerline-footer（v0.1 已绿），其余自家 fleet 不搬。
 - **v0.3 MCP bridge 方案作废**：用户指出 stable pi 1.0 起默认集成 MCP，改为**直接复用**内置 MCP 扩展（`src/extensions/mcp`）+ 新增 tool-bridge（stable 扩展活动工具镜像进 durable registry、durable beforeTool 转发 stable tool_call、扩展命令在 prompt 派发），已于 v0.2 当日落成并全链路验收（手写 stdio MCP 服务器，模型直调 mcp__server__tool，/mcp 面板可用）。遗留：非 direct 曝光（codemode/tool_search/deferred）未桥接。

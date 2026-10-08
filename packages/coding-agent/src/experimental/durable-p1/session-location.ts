@@ -2,7 +2,7 @@
 // Same shape as ../durable/sessions.ts, but rooted at durable-p1-sessions.
 
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, realpath } from "node:fs/promises";
+import { mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { getAgentDir } from "../../config.ts";
@@ -49,7 +49,23 @@ export async function selectP1Session(cwdInput: string, continueSession: boolean
 		await mkdir(directory);
 		created = true;
 	}
+	return lockLocation(cwd, directory, created);
+}
 
+/** Attach one specific session for `cwd` by its directory id. */
+export async function selectP1SessionById(cwdInput: string, sessionId: string): Promise<P1SessionLocation> {
+	const cwd = await realpath(resolve(cwdInput));
+	if (!/^\d{13}-[0-9a-f-]{36}$/u.test(sessionId)) {
+		throw new Error(`durable-p1: invalid session id ${sessionId}`);
+	}
+	const directory = join(p1SessionsRoot(cwd), sessionId);
+	if (!(await stat(directory).then(() => true).catch(() => false))) {
+		throw new Error(`durable-p1: no session ${sessionId} for ${cwd}`);
+	}
+	return lockLocation(cwd, directory, false);
+}
+
+async function lockLocation(cwd: string, directory: string, created: boolean): Promise<P1SessionLocation> {
 	let release: () => Promise<void>;
 	try {
 		release = await lockfile.lock(directory, {
@@ -59,5 +75,12 @@ export async function selectP1Session(cwdInput: string, continueSession: boolean
 	} catch (error) {
 		throw new Error(`Session is already open in another process: ${directory}`, { cause: error });
 	}
-	return { id: basename(directory), directory, database: join(directory, "session.sqlite"), cwd, created, release };
+	return {
+		id: basename(directory),
+		directory,
+		database: join(directory, "session.sqlite"),
+		cwd,
+		created,
+		release,
+	};
 }

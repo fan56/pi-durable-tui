@@ -13,7 +13,19 @@ MCP_FIXTURE="$REPO_ROOT/e2e/durable-p1/fixtures/mcp-server.mjs"
 [ -f "$MCP_FIXTURE" ] || { echo "FATAL: MCP fixture missing" >&2; exit 2; }
 
 KEEP=0
-[ "${1:-}" = "--keep" ] && KEEP=1
+ONLY=()
+for a in "$@"; do
+	case "$a" in
+		--keep) KEEP=1 ;;
+		*) ONLY+=("$a") ;;
+	esac
+done
+want() { # want <scenario>: true when no filter or selected
+	[ ${#ONLY[@]} -eq 0 ] && return 0
+	local s
+	for s in "${ONLY[@]}"; do [ "$s" = "$1" ] && return 0; done
+	return 1
+}
 
 LAB="$(mktemp -d "${TMPDIR:-/tmp}/pi-durable-e2e.XXXXXX")"
 SESSIONS_ROOT=""
@@ -57,14 +69,15 @@ tui_dead() { grep -q "^EXITED$" "$LAB/$1.err" 2>/dev/null; }
 
 tui_kill() { t kill-session -t "$1" 2>/dev/null || true; }
 
-scenario() { # scenario <name> <fn>
+scenario() { # scenario <name> <fn> [tmux-name]
 	CURRENT="$1"
+	local tminame="${3:-$1}"
 	echo "── scenario: $CURRENT"
 	if "$2"; then
 		echo "PASS  $CURRENT"; PASS=$((PASS + 1))
 	else
-		echo "FAIL  $CURRENT (evidence in $LAB/$CURRENT.pane + $LAB/*.err)"
-		pane "$CURRENT" >"$LAB/$CURRENT.pane" 2>/dev/null || true
+		echo "FAIL  $CURRENT (evidence in $LAB/$tminame.pane + $LAB/*.err)"
+		pane "$tminame" >"$LAB/$tminame.pane" 2>/dev/null || true
 		FAIL=$((FAIL + 1)); FAILED_SCENARIOS+=("$CURRENT")
 	fi
 }
@@ -74,7 +87,7 @@ skip_scenario() { # skip_scenario <name> <reason>
 }
 
 cleanup() {
-	for name in boot tool mcp mcpcmd compact steer mswitch killu cont listw footer; do
+	for name in boot tool mcp mcpcmd compact steer mswitch killu cont listw sess sflag footer; do
 		t kill-session -t "$name" 2>/dev/null || true
 	done
 	if [ -n "$SESSIONS_ROOT" ] && [ -d "$SESSIONS_ROOT" ]; then
@@ -226,23 +239,59 @@ s_footer() {
 	return 0
 }
 
+s_sessions() {
+	tui_start sess "${BOOT_ARGS[@]}"
+	tui_expect sess 60 "deepseek-flash" || return 1
+	tui_keys sess "Remember the codeword: e2e-kiwi-21. Reply ok."; sleep 1; tui_keys sess Enter
+	tui_expect sess 90 "e2e-kiwi-21" || return 1
+	# /new: fresh durable session through the runtime factory
+	tui_keys sess "/new"; sleep 1; tui_keys sess Escape; sleep 1; tui_keys sess Enter
+	tui_expect sess 30 "New session started" || return 1
+	tui_keys sess "Reply with exactly: blank-ok"; sleep 1; tui_keys sess Enter
+	tui_expect sess 90 "blank-ok" || return 1
+	# /sessions picker: previous session listed, current one excluded
+	tui_keys sess "/sessions"; sleep 1; tui_keys sess Escape; sleep 1; tui_keys sess Enter
+	tui_expect sess 30 "Switch to durable session" || return 1
+	pane sess | grep -E "^ *[→ ]*20[0-9]{2}-" | grep -q "e2e-kiwi-21" || return 1
+	if pane sess | grep -E "^ *[→ ]*20[0-9]{2}-" | grep -q "blank-ok"; then return 1; fi
+	# cursor sits on the first row (the kiwi session); switch to it
+	tui_keys sess Enter
+	tui_expect sess 30 "Resumed session" || return 1
+	tui_expect sess 30 "e2e-kiwi-21" || return 1
+	tui_keys sess "Reply with exactly: switched-ok"; sleep 1; tui_keys sess Enter
+	tui_expect sess 90 "switched-ok" || return 1
+}
+
+s_sessionflag() {
+	# Release the lock the sessions scenario's live process holds on kiwi.
+	tui_kill sess
+	sleep 2
+	local id
+	id=$(cd "$LAB" && node --import "$RESOLVER" "$ENTRY" --list 2>/dev/null | grep "e2e-kiwi-21" | awk '{print $2}')
+	[ -n "$id" ] || return 1
+	tui_start sflag "${BOOT_ARGS[@]}" --session "$id"
+	tui_expect sflag 60 "e2e-kiwi-21" || return 1
+}
+
 # --- run ----------------------------------------------------------------------
 
 echo "lab: $LAB"
 echo "sessions root: $SESSIONS_ROOT"
 
-scenario boot s_boot
-scenario tool s_tool
-scenario mcp s_mcp
-scenario mcpcmd s_mcpcmd
-scenario compact s_compact
-scenario steer s_steer
-scenario mswitch s_mswitch
-scenario killu s_killu
-scenario cont s_cont
-scenario list s_list
+want boot && scenario boot s_boot
+want tool && scenario tool s_tool
+want mcp && scenario mcp s_mcp
+want mcpcmd && scenario mcpcmd s_mcpcmd
+want compact && scenario compact s_compact
+want steer && scenario steer s_steer
+want mswitch && scenario mswitch s_mswitch
+want killu && scenario killu s_killu killu
+want cont && scenario cont s_cont cont
+want list && scenario list s_list list
+want sessions && scenario sessions s_sessions sess
+want sessionflag && scenario sessionflag s_sessionflag sflag
 if [ -f "$HOME/repo/pi-powerline-footer/index.ts" ]; then
-	scenario footer s_footer
+	want footer && scenario footer s_footer footer
 else
 	skip_scenario footer "fixture ~/repo/pi-powerline-footer not present"
 fi
