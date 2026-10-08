@@ -1,32 +1,40 @@
-// durable-p1 spike (wayfinder ticket 006, route B): the stable interactive-mode
-// TUI running on the durable Harness. This facade wraps a REAL AgentSession
-// (built with an in-memory SessionManager, real services, and the pi default
-// model, but an engine that never runs) in a Proxy that reroutes the turn
-// surface — prompt/steer/followUp/abort/compact/model mutation — to the durable
-// root Conversation, and feeds durable watchEvents through the parent's own
-// `_handleAgentEvent` so persistence-to-memory, extension dispatch, and the
-// AgentSessionEvent fan-out to the TUI all run the production code path.
+// durable-p1 (wayfinder tickets 006 route B + 009): the production facade that
+// runs the STABLE interactive-mode TUI on the durable Harness. A real
+// AgentSession (in-memory SessionManager, real services, engine never runs) is
+// driven externally: turn-surface calls (prompt/steer/followUp/abort/compact/
+// model mutation) reroute to the durable root Conversation, and durable
+// watchEvents batches flow through the session's own pipeline via the
+// headless contract (headless-session.ts), so persistence, extension dispatch,
+// and the AgentSessionEvent fan-out all run production code.
+//
+// Host-surface gaps closed here (ticket 009 resolution 6):
+//   1. transcript rebuild from durable entries (transcript-rebuild.ts)
+//   2. real CompactionResult (summary + entry placement)
+//   3. session identity/naming/listing (session-meta.ts sidecars)
+//   4. queue-by-text: pendingMessageCount/getSteeringMessages/clearQueue
+//   5. agent_settled / queue_update / thinking_level_changed /
+//      session_info_changed events
+//   6. tool-loadout visibility backed by the durable registry
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AgentEvent, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
-import type { Conversation, ModelRef } from "@earendil-works/pi-durable";
+import type { Conversation, EntryRecord, ModelRef, Submission, ToolRegistration } from "@earendil-works/pi-durable";
 import { Harness, watchEvents } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type {
 	AgentSession,
-	AgentSessionEvent,
+	ModelCycleResult,
 	ModelMutationOptions,
 	PromptOptions,
 	QueuedInputDisposition,
 } from "../../core/agent-session.ts";
-import {
-	type AgentSessionServices,
-	createAgentSessionFromServices,
-	createAgentSessionServices,
-} from "../../core/agent-session-services.ts";
+import { prepareCompaction } from "../../core/compaction/compaction.ts";
 import type { CompactionResult } from "../../core/compaction/compaction.ts";
+import type { ToolDefinition, ToolInfo } from "../../core/extensions/types.ts";
+import type { AgentSessionServices } from "../../core/agent-session-services.ts";
+import { createAgentSessionFromServices, createAgentSessionServices } from "../../core/agent-session-services.ts";
 import { SessionManager } from "../../core/session-manager.ts";
 import { sleep } from "../../utils/sleep.ts";
 import {
@@ -38,50 +46,62 @@ import {
 } from "../durable/harness-setup.ts";
 import { Subagent } from "../durable/subagent.ts";
 import { DurableEventAdapter } from "./event-adapter.ts";
+import { bindHeadlessInternals, type HeadlessSessionContract } from "./headless-session.ts";
 import { selectP1Session } from "./session-location.ts";
+import { updateMeta, writeInitialMeta } from "./session-meta.ts";
+import { rebuildTranscript } from "./transcript-rebuild.ts";
 
-/** Private AgentSession members the facade drives directly. */
-type SessionInternals = {
-	_handleAgentEvent: (event: AgentEvent) => Promise<void>;
-	_emit: (event: AgentSessionEvent) => void;
-	_steeringMessages: string[];
-	_followUpMessages: string[];
-	_emitQueueUpdate: () => void;
-};
+export interface DurableP1SessionOptions {
+	/** Working directory for the agent and session lookup. */
+	cwd: string;
+	/** Attach the newest existing session for cwd instead of creating one. */
+	continueSession: boolean;
+	/** Explicit provider/model override (mirrors stable --provider/--model). */
+	model?: { provider?: string; model: string };
+	/** Skip loading user/project extensions entirely (stable --no-extensions). */
+	noExtensions?: boolean;
+	/** Extra extension paths to load (stable -e), on top of the defaults. */
+	extraExtensions?: string[];
+}
 
 export interface DurableP1Session {
 	session: AgentSession;
 	services: AgentSessionServices;
 	modelFallbackMessage: string | undefined;
-	/** A factory that throws: /new, /resume, /fork, and import are out of scope. */
+	/** A factory that throws: /new, /resume, /fork, and import stay out of v0.1 scope. */
 	throwingRuntimeFactory: () => Promise<never>;
 	close(): Promise<void>;
 }
 
-export async function createDurableP1Session(continueSession: boolean): Promise<DurableP1Session> {
+/** One queued input plus the submission handle that can withdraw it. */
+interface QueuedInput {
+	text: string;
+	submission: Submission | undefined;
+}
+
+export async function createDurableP1Session(options: DurableP1SessionOptions): Promise<DurableP1Session> {
 	const context = BACKGROUND_CONTEXT;
-	const location = await selectP1Session(process.cwd(), continueSession);
+	const location = await selectP1Session(options.cwd, options.continueSession);
 	let closed = false;
 	let target: AgentSession | undefined;
 	let harnessClose: (() => Promise<void>) | undefined;
 	let envsCleanup: (() => Promise<void>) | undefined;
 	try {
-		// The TUI-facing half: real services (settings, models, extensions, themes)
-		// and a real AgentSession whose in-process agent is never prompted.
-		const services = await createAgentSessionServices({ cwd: location.cwd });
-		const initial = await findInitialAgentModel(services.settingsManager, services.modelRuntime);
-		const model =
-			initial.model === undefined
-				? undefined
-				: services.modelRuntime.getModel(initial.model.provider, initial.model.modelId);
-		const created = await createAgentSessionFromServices({
-			services,
-			sessionManager: SessionManager.inMemory(location.cwd),
-			model,
-			thinkingLevel: initial.thinkingLevel as ThinkingLevel | undefined,
+		// The TUI-facing half: real services (settings, models, extensions,
+		// themes) and a real AgentSession whose in-process agent never runs.
+		const services = await createAgentSessionServices({
+			cwd: location.cwd,
+			...(options.noExtensions === undefined && options.extraExtensions === undefined
+				? {}
+				: {
+						resourceLoaderOptions: {
+							...(options.noExtensions ? { noExtensions: true } : {}),
+							...(options.extraExtensions === undefined || options.extraExtensions.length === 0
+								? {}
+								: { additionalExtensionPaths: options.extraExtensions }),
+						},
+					}),
 		});
-		target = created.session;
-		const internals = target as unknown as SessionInternals;
 
 		// The engine half: the durable Harness with pi's coding tools and prompt.
 		const envs = new ExecutionEnvs(location.cwd);
@@ -104,41 +124,177 @@ export async function createDurableP1Session(continueSession: boolean): Promise<
 		const root: Conversation = await harness.root(context, {
 			agent: {
 				cwd: location.cwd,
-				...(initial.model === undefined ? {} : { model: initial.model }),
-				...(initial.thinkingLevel === undefined ? {} : { thinkingLevel: initial.thinkingLevel }),
 			},
 		});
 
-		// Facade state the overrides below share with the event ingest path.
+		// Initial model: the conversation's own pi.agent doc wins on resume
+		// (model choices survive restarts), else settings/CLI defaults.
+		const initial =
+			options.model === undefined
+				? await findInitialAgentModel(services.settingsManager, services.modelRuntime)
+				: await findInitialAgentModel(services.settingsManager, services.modelRuntime, options.model);
+		if (location.created) {
+			// A fresh conversation needs its pi.agent model seeded; a resumed
+			// one keeps what it had (configure would clobber the user's pick).
+			await root.configure(
+				{
+					...(initial.model === undefined ? {} : { model: initial.model }),
+					...(initial.thinkingLevel === undefined ? {} : { thinkingLevel: initial.thinkingLevel }),
+				},
+				context,
+			);
+		}
+		const resolvedAgent = await root.agent(context);
+		const modelRef: ModelRef | undefined = resolvedAgent.model ?? initial.model;
+		const model =
+			modelRef === undefined
+				? undefined
+				: services.modelRuntime.getModel(modelRef.provider, modelRef.modelId);
+		const thinkingLevel = (resolvedAgent.thinkingLevel ?? initial.thinkingLevel) as
+			| ThinkingLevel
+			| undefined;
+
+		// Transcript rebuild: on resume the in-memory SessionManager starts from
+		// the durable active entries so the TUI renders history and stats/usage
+		// read the real transcript.
+		const durableIdToSessionId = new Map<string, string>();
+		const rebuilt = location.created
+			? undefined
+			: rebuildTranscript(String(root.id), location.cwd, (await root.context(context)).entries);
+		const sessionManager: SessionManager = location.created
+			? SessionManager.inMemory(location.cwd)
+			: SessionManager.inMemory(location.cwd, {}, rebuilt!.fileEntries);
+		if (rebuilt !== undefined) {
+			for (const [durableId, sessionId] of rebuilt.idMap) durableIdToSessionId.set(durableId, sessionId);
+		}
+
+		const created = await createAgentSessionFromServices({
+			services,
+			sessionManager,
+			model,
+			thinkingLevel,
+		});
+		target = created.session;
+		const session = target;
+		const internals: HeadlessSessionContract = bindHeadlessInternals(target);
+		await writeInitialMeta(location);
+
+		// Facade state shared by the overrides and the event ingest path.
 		let running = false;
 		let compacting = false;
 		let abortRequested = false;
 		let runStarts = 0;
+		let titleRecorded = false;
+		// Manual compaction: the compact() override materializes the result
+		// itself; the ingest path must not double-append.
+		let manualCompaction = false;
+		let manualCompactionEntry: EntryRecord | undefined;
+		const pendingQueuedInputs: QueuedInput[] = [];
+		// Tool-loadout cache for the sync tool surface (ticket 009 gap 6).
+		const toolRegistrations = new Map<string, ToolRegistration>();
+		let activeToolNames: string[] = [];
+		const refreshToolCache = (tools: readonly ToolRegistration[]) => {
+			toolRegistrations.clear();
+			for (const tool of tools) toolRegistrations.set(tool.name, tool);
+			activeToolNames = [...toolRegistrations.keys()];
+		};
+		refreshToolCache(resolvedAgent.tools);
+		const refreshToolCacheFromRegistry = async () => {
+			try {
+				refreshToolCache((await root.agent(context)).tools);
+			} catch (error) {
+				console.error("[durable-p1] tool cache refresh failed:", error);
+			}
+		};
+		registry.subscribe(() => void refreshToolCacheFromRegistry());
+
 		const adapter = new DurableEventAdapter();
 		let chain: Promise<void> = Promise.resolve();
 		const stream = await watchEvents(harness, root.id, context);
+
+		/** Materialize a durable compaction entry into the session transcript. */
+		const materializeCompaction = (entry: EntryRecord, tokensBefore: number): CompactionResult => {
+			const message = entry.model?.[0];
+			const wrapped = message !== undefined && message.role === "user" ? contentText(message) : "";
+			const summaryStart = wrapped.indexOf("<summary>");
+			const summaryEnd = wrapped.lastIndexOf("</summary>");
+			const summary =
+				summaryStart !== -1 && summaryEnd > summaryStart
+					? wrapped.slice(summaryStart + "<summary>".length, summaryEnd).trim()
+					: wrapped.trim();
+			const firstKept =
+				entry.head === undefined
+					? null
+					: (durableIdToSessionId.get(String(entry.head)) ?? null);
+			const entryId = sessionManager.appendCompaction(summary, firstKept, tokensBefore);
+			durableIdToSessionId.set(String(entry.id), entryId);
+			return { summary, firstKeptEntryId: firstKept ?? "", tokensBefore };
+		};
+
 		stream.start((events, deliveryContext) => {
-			// Batches must be handled strictly in order; _handleAgentEvent awaits
-			// extension listeners, so a shared promise chain keeps them sequential.
+			// Batches must be handled strictly in order; ingest awaits extension
+			// listeners, so a shared promise chain keeps them sequential.
 			const run = chain.then(async () => {
 				if (closed) return;
 				if (events.some((event) => event.type === "run_start")) {
 					running = true;
 					runStarts++;
 				}
+				// Structural events the AgentEvent translation does not carry.
+				for (const event of events) {
+					if (event.type === "entry_appended" && event.entry.kind === "pi.compaction") {
+						if (manualCompaction) {
+							manualCompactionEntry = event.entry;
+						} else {
+							// Auto/background compaction during a run: mirror the
+							// summary into the transcript and deliver the result.
+							const result = materializeCompaction(event.entry, 0);
+							const reason =
+								(event.entry.data as { reason?: "manual" | "threshold" | "overflow" } | undefined)
+									?.reason ?? "threshold";
+							internals.emitSessionEvent({
+								type: "compaction_end",
+								reason,
+								result,
+								aborted: false,
+								willRetry: false,
+							});
+						}
+					}
+				}
 				const translated = adapter.translate(events);
-				for (const event of translated) await internals._handleAgentEvent(event);
+				for (const event of translated) {
+					await internals.ingestAgentEvent(event);
+					if (event.type === "message_end") {
+						// Keep durable entry ids resolvable to session entry ids
+						// (compaction heads reference them).
+						const durable = events.find(
+							(candidate) =>
+								candidate.type === "message_end" && candidate.entry.model?.[0] === event.message,
+						);
+						if (durable !== undefined) {
+							const sessionId = internals.sessionEntryIdOf(event.message);
+							if (sessionId !== undefined) {
+								durableIdToSessionId.set(
+									String((durable as { type: "message_end"; entry: EntryRecord }).entry.id),
+									sessionId,
+								);
+							}
+						}
+					}
+				}
 				if (translated.some((event) => event.type === "agent_end")) {
 					running = false;
-					internals._emit({ type: "agent_settled", aborted: abortRequested });
+					await internals.emitExtensionEvent({ type: "agent_settled", aborted: abortRequested });
+					internals.emitSessionEvent({ type: "agent_settled", aborted: abortRequested });
 					abortRequested = false;
 				}
-				// Retry and compaction events are AgentSessionEvent-only: the session
-				// layer owns them, so emit them straight to the listeners.
+				// Retry and compaction progress are AgentSessionEvent-only: the
+				// session layer owns them, so emit them straight to the listeners.
 				const retrySettings = services.settingsManager.getRetrySettings();
 				for (const event of events) {
 					if (event.type === "auto_retry_start") {
-						internals._emit({
+						internals.emitSessionEvent({
 							type: "auto_retry_start",
 							attempt: event.attempt,
 							maxAttempts: retrySettings.maxRetries,
@@ -146,20 +302,19 @@ export async function createDurableP1Session(continueSession: boolean): Promise<
 							errorMessage: event.errorMessage,
 						});
 					} else if (event.type === "auto_retry_end") {
-						internals._emit({ type: "auto_retry_end", success: true, attempt: event.attempt });
-					} else if (event.type === "compaction_start") {
-						internals._emit({ type: "compaction_start", reason: event.reason });
-					} else if (event.type === "compaction_end") {
-						// A real result would make the TUI rebuild from a session-manager
-						// compaction entry this facade never writes; keep it resultless.
-						internals._emit({
-							type: "compaction_end",
-							reason: event.reason,
-							result: undefined,
-							aborted: false,
-							willRetry: false,
+						internals.emitSessionEvent({
+							type: "auto_retry_end",
+							success: true,
+							attempt: event.attempt,
 						});
-					}
+					} else if (event.type === "compaction_start") {
+						if (!manualCompaction) {
+							internals.emitSessionEvent({ type: "compaction_start", reason: event.reason });
+						}
+				} else if (event.type === "agent_changed") {
+					// Keep the tool cache honest when the selection changes.
+					void refreshToolCacheFromRegistry();
+				}
 				}
 				void deliveryContext;
 			});
@@ -167,58 +322,83 @@ export async function createDurableP1Session(continueSession: boolean): Promise<
 			return chain;
 		});
 
+		const recordTitle = (text: string): void => {
+			if (titleRecorded) return;
+			titleRecorded = true;
+			void updateMeta(location.directory, { title: text.slice(0, 120) });
+		};
+
 		const queueInput = async (text: string, behavior: "steer" | "followUp"): Promise<void> => {
-			// The parent's queue display: durable delivers the input as a user entry,
-			// whose message_start de-queues it again in _handleAgentEvent.
-			(behavior === "followUp" ? internals._followUpMessages : internals._steeringMessages).push(text);
-			internals._emitQueueUpdate();
-			const submission = await root.submit({ type: "input", content: text, whenBusy: behavior }, context);
+			// The parent's queue display: durable delivers the input as a user
+			// entry, whose message_start de-queues it again in the pipeline.
+			(
+				behavior === "followUp" ? internals.followUpMessages : internals.steeringMessages
+			).push(text);
+			internals.emitQueueUpdate();
+			const submission = await root.submit(
+				{ type: "input", content: text, whenBusy: behavior },
+				context,
+			);
+			pendingQueuedInputs.push({ text, submission });
+			recordTitle(text);
 			await submission.wait(context);
 		};
 		const submitIdle = async (text: string): Promise<void> => {
 			running = true;
 			abortRequested = false;
 			const before = runStarts;
+			recordTitle(text);
 			const submission = await root.submit({ type: "input", content: text, whenBusy: "steer" }, context);
 			await submission.wait(context);
-			// If no run ever started (input dropped before a run began), clear the busy
-			// flag here; otherwise the agent_end translation clears it.
+			// If no run ever started (input dropped before a run began), clear
+			// the busy flag here; otherwise the agent_end translation clears it.
 			if (runStarts === before) {
 				await sleep(200);
 				if (runStarts === before) running = false;
 			}
 		};
 
-		const session = target;
 		const overrides: Record<string, unknown> = {
-			prompt: async (text: string, options?: PromptOptions): Promise<void> => {
-				if (options?.images !== undefined && options.images.length > 0) {
-					throw new Error("durable-p1: images are not supported in this spike");
+			prompt: async (text: string, promptOptions?: PromptOptions): Promise<void> => {
+				if (promptOptions?.images !== undefined && promptOptions.images.length > 0) {
+					throw new Error("durable-p1: images are not supported yet (upstream tools/read limitation)");
 				}
 				if (compacting) {
 					throw new Error(
 						"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.",
 					);
 				}
+				// Host-synthesized input events (ticket 009 resolution 5): run
+				// extension input handlers exactly like the base prompt path.
+				const handled = await internals.runInputHandlers(
+					text,
+					promptOptions?.source ?? "interactive",
+					promptOptions?.streamingBehavior,
+				);
+				if (handled === undefined) return;
 				if (running) {
-					if (options?.streamingBehavior === undefined) {
+					if (promptOptions?.streamingBehavior === undefined) {
 						throw new Error(
 							"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
 						);
 					}
-					await queueInput(text, options.streamingBehavior);
+					await queueInput(handled.text, promptOptions.streamingBehavior);
 					return;
 				}
-				await submitIdle(text);
+				await submitIdle(handled.text);
 			},
 			steer: async (text: string): Promise<QueuedInputDisposition> => {
-				if (running) await queueInput(text, "steer");
-				else await submitIdle(text);
+				const handled = await internals.runInputHandlers(text, "interactive", "steer");
+				if (handled === undefined) return "handled";
+				if (running) await queueInput(handled.text, "steer");
+				else await submitIdle(handled.text);
 				return "queued";
 			},
 			followUp: async (text: string): Promise<QueuedInputDisposition> => {
-				if (running) await queueInput(text, "followUp");
-				else await submitIdle(text);
+				const handled = await internals.runInputHandlers(text, "interactive", "followUp");
+				if (handled === undefined) return "handled";
+				if (running) await queueInput(handled.text, "followUp");
+				else await submitIdle(handled.text);
 				return "queued";
 			},
 			abort: async (): Promise<void> => {
@@ -227,11 +407,28 @@ export async function createDurableP1Session(continueSession: boolean): Promise<
 				await root.abort(context);
 			},
 			abortCompaction: (): void => {
-				// root.abort stops a conversation's work, manual compaction included.
+				// root.abort stops a conversation's work, manual compaction
+				// included (R1 §3.1 #6: no compaction-only API upstream yet).
 				void root.abort(context);
 			},
 			compact: async (customInstructions?: string): Promise<CompactionResult> => {
+				if (running) await (overrides.abort as () => Promise<void>)();
+				// Stable parity for the two user-facing compaction refusals.
+				const modelNow = session.model;
+				if (modelNow === undefined) throw new Error("No model selected");
+				const settings = services.settingsManager.getCompactionSettings(modelNow);
+				const pathEntries = sessionManager.getBranch();
+				const preparation = prepareCompaction(pathEntries, settings);
+				if (!preparation) {
+					const lastEntry = pathEntries[pathEntries.length - 1];
+					if (lastEntry?.type === "compaction") throw new Error("Already compacted");
+					throw new Error("Nothing to compact (session too small)");
+				}
+				const tokensBefore = session.getContextUsage()?.tokens ?? 0;
 				compacting = true;
+				manualCompaction = true;
+				manualCompactionEntry = undefined;
+				internals.emitSessionEvent({ type: "compaction_start", reason: "manual" });
 				try {
 					const taskId = await root.compact(customInstructions, context);
 					const receipt = await harness.waitForTask(taskId, context);
@@ -240,31 +437,105 @@ export async function createDurableP1Session(continueSession: boolean): Promise<
 					if (outcome.status !== "completed") {
 						throw new Error(`durable-p1: compaction ${outcome.status}`);
 					}
-					return {
-						summary: "(durable compaction summary; chat re-render not wired in this spike)",
-						firstKeptEntryId: "",
-						tokensBefore: 0,
-					};
+					// The summary entry arrives through the ingest stream (write
+					// submission placement); fall back to a newest-first scan.
+					let entry: EntryRecord | undefined = manualCompactionEntry;
+					for (let attempt = 0; entry === undefined && attempt < 20; attempt++) {
+						await sleep(100);
+						entry = manualCompactionEntry;
+					}
+					if (entry === undefined) {
+						const page = await root.entries({ order: "descending" }, 16, undefined, context);
+						entry = page.items.find((candidate) => candidate.kind === "pi.compaction");
+					}
+					if (entry === undefined) throw new Error("durable-p1: compaction summary entry not found");
+					const result = materializeCompaction(entry, tokensBefore);
+					internals.emitSessionEvent({
+						type: "compaction_end",
+						reason: "manual",
+						result,
+						aborted: false,
+						willRetry: false,
+					});
+					return result;
 				} finally {
 					compacting = false;
+					manualCompaction = false;
+					manualCompactionEntry = undefined;
 				}
 			},
-			setModel: async (model: Model<never>, options?: ModelMutationOptions): Promise<void> => {
-				await session.setModel(model, options);
+			setModel: async (model: Model<never>, mutationOptions?: ModelMutationOptions): Promise<void> => {
+				await session.setModel(model, mutationOptions);
 				const thinking = (session.thinkingLevel ?? "off") as ModelThinkingLevel;
 				const ref: ModelRef = { provider: model.provider, modelId: model.id };
-				await root.configure({ model: ref, thinkingLevel: clampThinkingLevel(model, thinking) }, context);
+				await root.configure(
+					{ model: ref, thinkingLevel: clampThinkingLevel(model, thinking) },
+					context,
+				);
 			},
-			setThinkingLevel: (level: ThinkingLevel, options?: ModelMutationOptions): void => {
-				session.setThinkingLevel(level, options);
+			setThinkingLevel: (level: ThinkingLevel, mutationOptions?: ModelMutationOptions): void => {
+				session.setThinkingLevel(level, mutationOptions);
 				void root.configure({ thinkingLevel: level as ModelThinkingLevel }, context).catch(() => {});
 			},
-			cycleThinkingLevel: (options?: ModelMutationOptions): ThinkingLevel | undefined => {
-				const level = session.cycleThinkingLevel(options);
+			cycleThinkingLevel: (mutationOptions?: ModelMutationOptions): ThinkingLevel | undefined => {
+				const level = session.cycleThinkingLevel(mutationOptions);
 				if (level !== undefined) {
-					void root.configure({ thinkingLevel: level as ModelThinkingLevel }, context).catch(() => {});
+					void root
+						.configure({ thinkingLevel: level as ModelThinkingLevel }, context)
+						.catch(() => {});
 				}
 				return level;
+			},
+			cycleModel: async (
+				direction?: "forward" | "backward",
+				mutationOptions?: ModelMutationOptions,
+			): Promise<ModelCycleResult | undefined> => {
+				const result = await session.cycleModel(direction, mutationOptions);
+				if (result !== undefined && result.model !== undefined) {
+					const ref: ModelRef = { provider: result.model.provider, modelId: result.model.id };
+					await root.configure(
+						{
+							model: ref,
+							thinkingLevel: clampThinkingLevel(
+								result.model,
+								(session.thinkingLevel ?? "off") as ModelThinkingLevel,
+							),
+						},
+						context,
+					);
+				}
+				return result;
+			},
+			setSessionName: (name: string): void => {
+				session.setSessionName(name);
+				void updateMeta(location.directory, { name });
+			},
+			clearQueue: (): { steering: string[]; followUp: string[] } => {
+				// Withdraw the durable inbox copies before clearing the mirror.
+				for (const queued of pendingQueuedInputs.splice(0)) {
+					void queued.submission?.abort(context).catch(() => {});
+				}
+				return session.clearQueue();
+			},
+			getActiveToolNames: (): string[] => [...activeToolNames],
+			getCallableToolNames: (): string[] => [...activeToolNames],
+			getAllTools: (): ToolInfo[] =>
+				[...toolRegistrations.values()].map((tool) => ({
+					name: tool.name,
+					description: tool.description,
+					parameters: tool.parameters,
+				})) as ToolInfo[],
+			getToolDefinition: (name: string): ToolDefinition | undefined =>
+				toolRegistrations.get(name) as unknown as ToolDefinition | undefined,
+			setActiveToolsByName: (names: readonly string[]): void => {
+				const snapshot = registry.snapshot();
+				const all = snapshot.tools().map((pair) => pair.tool);
+				const removals = all.filter((tool) => !names.includes(tool.name));
+				if (removals.length === 0) return;
+				void root
+					.configure({ tools: { remove: removals } }, context)
+					.then(() => refreshToolCacheFromRegistry())
+					.catch((error) => console.error("[durable-p1] setActiveToolsByName failed:", error));
 			},
 			waitForIdle: async (): Promise<void> => {
 				while (running || compacting) await sleep(100);
@@ -281,7 +552,9 @@ export async function createDurableP1Session(continueSession: boolean): Promise<
 				if (prop === "isCompacting") return compacting || t.isCompacting;
 				if (prop in overrides) return overrides[prop as string];
 				const value = Reflect.get(t, prop, t);
-				return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(t) : value;
+				return typeof value === "function"
+					? (value as (...args: unknown[]) => unknown).bind(t)
+					: value;
 			},
 		}) as unknown as AgentSession;
 
@@ -305,7 +578,9 @@ export async function createDurableP1Session(continueSession: boolean): Promise<
 		// Recovered work from an interrupted turn continues now.
 		harness.resume();
 		const throwingRuntimeFactory = async (): Promise<never> => {
-			throw new Error("durable-p1: /new, /resume, /fork, and import are not supported in this spike");
+			throw new Error(
+				"durable-p1: /new, /resume, /fork, and import are planned for v0.4 (session management)",
+			);
 		};
 		return {
 			session: proxy,
@@ -325,4 +600,18 @@ export async function createDurableP1Session(continueSession: boolean): Promise<
 		}
 		throw error;
 	}
+}
+
+function contentText(message: { content?: unknown }): string {
+	const content = message.content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter(
+			(block): block is { type: "text"; text: string } =>
+				typeof block === "object" &&
+				block !== null &&
+				(block as { type?: unknown }).type === "text",
+		)
+		.map((block) => block.text)
+		.join("\n");
 }

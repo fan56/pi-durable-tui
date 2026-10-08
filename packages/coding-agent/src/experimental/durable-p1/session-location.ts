@@ -17,15 +17,20 @@ export interface P1SessionLocation {
 	release(): Promise<void>;
 }
 
-/** A new session for `cwd`, or its newest one with `continueSession`. */
-export async function selectP1Session(cwdInput: string, continueSession: boolean): Promise<P1SessionLocation> {
-	const cwd = await realpath(resolve(cwdInput));
-	const root = join(
+/** The per-cwd sessions root directory (hash-partitioned, prototype-isolated). */
+export function p1SessionsRoot(cwd: string): string {
+	return join(
 		getAgentDir(),
 		"experimental",
 		"durable-p1-sessions",
 		createHash("sha256").update(cwd).digest("hex").slice(0, 24),
 	);
+}
+
+/** A new session for `cwd`, or its newest one with `continueSession`. */
+export async function selectP1Session(cwdInput: string, continueSession: boolean): Promise<P1SessionLocation> {
+	const cwd = await realpath(resolve(cwdInput));
+	const root = p1SessionsRoot(cwd);
 	await mkdir(root, { recursive: true });
 
 	let directory: string;
