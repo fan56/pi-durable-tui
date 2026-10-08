@@ -123,3 +123,13 @@ For release preparation, publishing, verification, or recovery, load and follow 
 ## User Override
 
 If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.
+
+## Fork layer (pi-durable-coding-agent)
+
+本仓是 earendil-works/pi 的 fork，工作分支 `feat/durable-coding-agent`（wayfinder 决策见 `wayfinder/MAP.md`）。上游规则（本文上半部分）仍然生效，另加 fork 层约定：
+
+- 文档写中文；代码注释与 commit message 写英文（上游格式 `{feat,fix,docs}(...)` 不变）。
+- `docs/research/*` 是 throwaway 调研产物，不维护时效。
+- 对上游文件的实质改动必须先在 wayfinder 开票登记（R4 约束：优先只加新文件，不改上游；`packages/durable/src/harness/**` 只经 ToolExecutionApi/HookApi 扩展）。
+- 会话数据走 `~/.pi/agent/experimental/durable-p1-sessions/`（原型隔离目录）；`~/.pi/agent` 其余内容是与正式版 pi 共享的配置，只读对待。
+- 不 push 远端、不发 npm。
