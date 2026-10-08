@@ -55,8 +55,13 @@ export class DurableEventAdapter {
 					// Stream our own copy; message_update deltas apply to it.
 					this.partial = cloneAssistant(event.message);
 					out.push({ type: "message_start", message: this.partial });
+				} else if (event.message.role === "system") {
+					// Positional prompt entries (pi.system): stable never emits
+					// system messages as agent events, and persisting them would
+					// pollute branch stats and drift from the rebuild path.
+					break;
 				} else {
-					out.push({ type: "message_start", message: event.message as AgentMessage });
+					out.push({ type: "message_start", message: normalizeUserMessage(event.message) });
 				}
 				break;
 			case "message_update":
@@ -73,6 +78,7 @@ export class DurableEventAdapter {
 			case "message_end": {
 				const message = entryMessage(event.entry);
 				if (message === undefined) break;
+				if (message.role === "system") break; // see message_start
 				if (message.role === "assistant") {
 					// A streamed assistant already had its message_start from the partial;
 					// durable's translate emits message_start itself for the rest.
@@ -82,8 +88,10 @@ export class DurableEventAdapter {
 				} else if (message.role === "toolResult") {
 					this.turnToolResults.push(message);
 				}
-				out.push({ type: "message_end", message });
-				this.runMessages.push(message);
+				const normalized =
+					message.role === "user" ? normalizeUserMessage(message) : (message as AgentMessage);
+				out.push({ type: "message_end", message: normalized });
+				this.runMessages.push(normalized);
 				break;
 			}
 			case "tool_execution_start":
@@ -178,6 +186,20 @@ export class DurableEventAdapter {
 function cloneAssistant(message: Message): AssistantMessage {
 	const assistant = message as AssistantMessage;
 	return { ...assistant, content: assistant.content.map((block) => ({ ...block })) };
+}
+
+/**
+ * durable stores user input as a plain string (submissions.ts writes
+ * `content: draft.content`); the stable ecosystem (extensions, stats, the
+ * stock TUI paths that assume pi-ai's array form) expects text blocks.
+ * Return a normalized copy, leaving array content untouched.
+ */
+export function normalizeUserMessage(message: Message): AgentMessage {
+	if (message.role !== "user" || typeof message.content !== "string") return message as AgentMessage;
+	return {
+		...message,
+		content: [{ type: "text", text: message.content }],
+	} as unknown as AgentMessage;
 }
 
 function entryMessage(entry: EntryRecord): AgentMessage | undefined {

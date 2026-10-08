@@ -174,4 +174,35 @@ describe("DurableEventAdapter", () => {
 		]);
 		expect(events).toHaveLength(0);
 	});
+
+	test("string user content is normalized to text blocks", () => {
+		const adapter = new DurableEventAdapter();
+		const raw = { role: "user", content: "plain string input", timestamp: "" };
+		const events = translateBatches(adapter, [
+			[
+				{ type: "message_start", message: raw },
+				{ type: "message_end", entry: { id: "e1", kind: "pi.user", model: [raw] } },
+			],
+		]);
+		expect(events.map((event) => event.type)).toEqual(["message_start", "message_end"]);
+		for (const event of events) {
+			const message = event["message"] as { content: { type: string; text: string }[] };
+			expect(Array.isArray(message.content)).toBe(true);
+			expect(message.content[0]).toEqual({ type: "text", text: "plain string input" });
+		}
+	});
+
+	test("system-role messages are dropped (stable parity)", () => {
+		const adapter = new DurableEventAdapter();
+		const system = { role: "system", content: "positional prompt" };
+		const events = translateBatches(adapter, [
+			[
+				{ type: "message_start", message: system },
+				{ type: "message_end", entry: { id: "e0", kind: "pi.system", model: [system] } },
+			],
+			[{ type: "message_end", entry: { id: "e1", kind: "pi.user", model: [userMessage("q")] } }],
+		]);
+		// Only the user message survives.
+		expect(events.map((event) => event.type)).toEqual(["message_end"]);
+	});
 });

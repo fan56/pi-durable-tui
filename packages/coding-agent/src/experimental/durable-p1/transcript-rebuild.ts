@@ -15,6 +15,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import type { FileEntry, SessionEntry, SessionHeader } from "../../core/session-manager.ts";
+import { normalizeUserMessage } from "./event-adapter.ts";
 
 const SUMMARY_OPEN = "<summary>";
 const SUMMARY_CLOSE = "</summary>";
@@ -41,7 +42,16 @@ export function unwrapCompactionSummary(text: string): string {
 export function entryToSessionEntry(entry: EntryRecord, timestamp: string): SessionEntry | undefined {
 	const message = entry.model?.[0];
 	switch (entry.kind) {
-		case "pi.user":
+		case "pi.user": {
+			if (message === undefined) return undefined;
+			return {
+				type: "message",
+				message: normalizeUserMessage(message),
+				id: String(entry.id),
+				parentId: null,
+				timestamp,
+			};
+		}
 		case "pi.assistant":
 		case "pi.tool-result": {
 			if (message === undefined) return undefined;
@@ -59,7 +69,7 @@ export function entryToSessionEntry(entry: EntryRecord, timestamp: string): Sess
 			if (message === undefined || message.role !== "user") return undefined;
 			return {
 				type: "message",
-				message: message as AgentMessage,
+				message: normalizeUserMessage(message),
 				id: String(entry.id),
 				parentId: null,
 				timestamp,
