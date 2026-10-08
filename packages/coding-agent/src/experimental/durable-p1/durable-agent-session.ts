@@ -413,23 +413,25 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 			},
 			compact: async (customInstructions?: string): Promise<CompactionResult> => {
 				if (running) await (overrides.abort as () => Promise<void>)();
-				// Stable parity for the two user-facing compaction refusals.
-				const modelNow = session.model;
-				if (modelNow === undefined) throw new Error("No model selected");
-				const settings = services.settingsManager.getCompactionSettings(modelNow);
-				const pathEntries = sessionManager.getBranch();
-				const preparation = prepareCompaction(pathEntries, settings);
-				if (!preparation) {
-					const lastEntry = pathEntries[pathEntries.length - 1];
-					if (lastEntry?.type === "compaction") throw new Error("Already compacted");
-					throw new Error("Nothing to compact (session too small)");
-				}
-				const tokensBefore = session.getContextUsage()?.tokens ?? 0;
 				compacting = true;
 				manualCompaction = true;
 				manualCompactionEntry = undefined;
+				// Mirror the base ordering: compaction_start fires before any
+				// guard, and every failure surfaces as a compaction_end event —
+				// the TUI's /compact handler swallows thrown errors by design.
 				internals.emitSessionEvent({ type: "compaction_start", reason: "manual" });
 				try {
+					const modelNow = session.model;
+					if (modelNow === undefined) throw new Error("No model selected");
+					const settings = services.settingsManager.getCompactionSettings(modelNow);
+					const pathEntries = sessionManager.getBranch();
+					const preparation = prepareCompaction(pathEntries, settings);
+					if (!preparation) {
+						const lastEntry = pathEntries[pathEntries.length - 1];
+						if (lastEntry?.type === "compaction") throw new Error("Already compacted");
+						throw new Error("Nothing to compact (session too small)");
+					}
+					const tokensBefore = session.getContextUsage()?.tokens ?? 0;
 					const taskId = await root.compact(customInstructions, context);
 					const receipt = await harness.waitForTask(taskId, context);
 					const outcome = receipt.state.outcome;
@@ -458,6 +460,17 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 						willRetry: false,
 					});
 					return result;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					internals.emitSessionEvent({
+						type: "compaction_end",
+						reason: "manual",
+						result: undefined,
+						aborted: message === "Compaction cancelled",
+						willRetry: false,
+						errorMessage: message,
+					});
+					throw error;
 				} finally {
 					compacting = false;
 					manualCompaction = false;
