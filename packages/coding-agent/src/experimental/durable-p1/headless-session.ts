@@ -34,6 +34,7 @@ type SessionInternals = {
 		streamingBehavior?: "steer" | "followUp",
 	): Promise<HeadlessInputResult>;
 	_entryIdsByMessage: WeakMap<object, string>;
+	_tryExecuteExtensionCommand(text: string): Promise<boolean>;
 };
 
 /** The public contract over a real session driven by external events. */
@@ -50,6 +51,8 @@ export interface HeadlessSessionContract {
 		source: InputSource,
 		streamingBehavior?: "steer" | "followUp",
 	): Promise<HeadlessInputResult>;
+	/** Execute a registered extension command ("/name args"); true when handled. */
+	tryExecuteExtensionCommand(text: string): Promise<boolean>;
 	/** The live queue mirror arrays the base class de-queues from on user message_start. */
 	readonly steeringMessages: string[];
 	readonly followUpMessages: string[];
@@ -57,6 +60,21 @@ export interface HeadlessSessionContract {
 	sessionEntryIdOf(message: object): string | undefined;
 	/** Dispatch one extension event (pi.on(...)) through the bound runner. */
 	emitExtensionEvent(event: Parameters<AgentSession["extensionRunner"]["emit"]>[0]): Promise<unknown>;
+	/**
+	 * Invoke `callback` after every tool-registry refresh on the session.
+	 * Extension tool registrations (`pi.registerTool`) funnel through
+	 * `_refreshToolRegistry`; wrapping it catches those. Active-set-only
+	 * changes (`setActiveTools`) do NOT pass here — callers must sync from
+	 * their own setActiveTools paths too.
+	 */
+	onToolRegistryRefresh(callback: () => void): void;
+	/**
+	 * Extension commands and handlers drive the LLM through `pi.sendMessage`,
+	 * which would light up the never-running in-process agent and race the
+	 * durable engine on the same SessionManager. Replace those entry points
+	 * with loud failures; returns false when the runtime shape changed.
+	 */
+	guardExtensionLlmCalls(): boolean;
 }
 
 /** Bind the contract to a real AgentSession built with a non-running agent. */
@@ -68,6 +86,7 @@ export function bindHeadlessInternals(session: AgentSession): HeadlessSessionCon
 		emitQueueUpdate: () => internals._emitQueueUpdate(),
 		runInputHandlers: (text, source, streamingBehavior) =>
 			internals._runInputHandlers(text, undefined, source, streamingBehavior),
+		tryExecuteExtensionCommand: (text: string) => internals._tryExecuteExtensionCommand(text),
 		get steeringMessages(): string[] {
 			return internals._steeringMessages;
 		},
@@ -76,5 +95,44 @@ export function bindHeadlessInternals(session: AgentSession): HeadlessSessionCon
 		},
 		sessionEntryIdOf: (message) => internals._entryIdsByMessage.get(message),
 		emitExtensionEvent: (event) => session.extensionRunner.emit(event),
+		onToolRegistryRefresh: (callback) => {
+			const holder = session as unknown as Record<string, unknown>;
+			if (Object.prototype.hasOwnProperty.call(holder, "_refreshToolRegistry")) {
+				throw new Error("headless-session: onToolRegistryRefresh bound twice");
+			}
+			const prototype = Object.getPrototypeOf(session) as Record<string, unknown>;
+			const original = prototype._refreshToolRegistry as (this: AgentSession, ...args: unknown[]) => void;
+			if (typeof original !== "function") {
+				throw new Error("headless-session: _refreshToolRegistry is not a prototype method (upstream change?)");
+			}
+			holder._refreshToolRegistry = function (this: AgentSession, ...args: unknown[]) {
+				const result = original.apply(this, args);
+				try {
+					callback();
+				} catch (error) {
+					console.error("[durable-p1] tool-registry refresh callback failed:", error);
+				}
+				return result;
+			};
+		},
+		guardExtensionLlmCalls: () => {
+			const runner = session.extensionRunner as unknown as {
+				runtime?: Record<string, unknown>;
+			};
+			const runtime = runner?.runtime;
+			if (runtime === undefined || !("sendMessage" in runtime) || !("sendUserMessage" in runtime)) {
+				return false;
+			}
+			const refuse =
+				(method: string) =>
+				(): never => {
+					throw new Error(
+						`durable-p1: pi.${method} is not supported here — the durable engine owns the conversation loop`,
+					);
+				};
+			runtime.sendMessage = refuse("sendMessage");
+			runtime.sendUserMessage = refuse("sendUserMessage");
+			return true;
+		},
 	};
 }

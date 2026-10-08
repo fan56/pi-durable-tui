@@ -30,11 +30,14 @@ title: pi-durable-coding-agent
 ## Not yet specified
 
 - session 双 agent 共存/迁移策略（durable-sessions 与 stable JSONL 的关系、互相导入）
-- 发布形态：bin 名、是否/何时替代日常 `pi`、GitHub fork 与 push 节奏
 - 性能基线：SQLite 大会话规模上限、流式提交粒度观感（观感判断已后置到 v0.1 日常使用，见 ticket 008）
 - 中文 locale 需求（stable 无 locale 机制）
-- MCP bridge 落地细化（R3 方案的实现级问题：registry 同名重装 churn、AgentEvent 字段对齐——v0.3 前毕业）
-- v0.2 扩展全线的逐个扩展排期（首个工具型扩展移植时定）
+
+## Resolved after charting（2026-10-08 晚，用户改向）
+
+- **发布形态 bin 名**：定为 `pi-durable`（本机 launcher `~/.local/bin/pi-durable`）。
+- **分期收缩**：v0.2「扩展全线」作废——用户拍板只保 pi-powerline-footer（v0.1 已绿），其余自家 fleet 不搬。
+- **v0.3 MCP bridge 方案作废**：用户指出 stable pi 1.0 起默认集成 MCP，改为**直接复用**内置 MCP 扩展（`src/extensions/mcp`）+ 新增 tool-bridge（stable 扩展活动工具镜像进 durable registry、durable beforeTool 转发 stable tool_call、扩展命令在 prompt 派发），已于 v0.2 当日落成并全链路验收（手写 stdio MCP 服务器，模型直调 mcp__server__tool，/mcp 面板可用）。遗留：非 direct 曝光（codemode/tool_search/deferred）未桥接。
 
 ## Out of scope
 

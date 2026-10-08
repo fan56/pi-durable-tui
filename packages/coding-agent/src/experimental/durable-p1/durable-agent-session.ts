@@ -49,6 +49,7 @@ import { DurableEventAdapter } from "./event-adapter.ts";
 import { bindHeadlessInternals, type HeadlessSessionContract } from "./headless-session.ts";
 import { selectP1Session } from "./session-location.ts";
 import { updateMeta, writeInitialMeta } from "./session-meta.ts";
+import { createStableToolBridge } from "./tool-bridge.ts";
 import { rebuildTranscript } from "./transcript-rebuild.ts";
 
 export interface DurableP1SessionOptions {
@@ -178,6 +179,25 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 		const session = target;
 		const internals: HeadlessSessionContract = bindHeadlessInternals(target);
 		await writeInitialMeta(location);
+		// Extension-driven pi.sendMessage would race the durable engine on the
+		// same SessionManager; refuse it loudly instead (oldfox review #3).
+		if (!internals.guardExtensionLlmCalls()) {
+			console.error("[durable-p1] could not guard pi.sendMessage (upstream runner shape changed?)");
+		}
+
+		// v0.2 tool bridge: mirror every ACTIVE bridged stable tool (the
+		// built-in MCP extension's tools are the target case) into the durable
+		// registry, and forward durable tool calls as stable tool_call events.
+		const toolBridge = createStableToolBridge({ session, registry, cwd: location.cwd });
+		internals.onToolRegistryRefresh(() => toolBridge.sync());
+		/** Re-sync the mirror; the active-set key gates redundant reinstalls. */
+		let lastSyncedActiveKey = "";
+		const reconcileToolBridge = (): void => {
+			const key = session.getActiveToolNames().join("\n");
+			if (key === lastSyncedActiveKey) return;
+			lastSyncedActiveKey = key;
+			toolBridge.sync();
+		};
 
 		// Facade state shared by the overrides and the event ingest path.
 		let running = false;
@@ -207,6 +227,11 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 			}
 		};
 		registry.subscribe(() => void refreshToolCacheFromRegistry());
+		// Initial sync AFTER subscribing: the install publication must reach
+		// the visibility cache, or mirrored tools stay invisible until the
+		// next registry change (oldfox review #7).
+		reconcileToolBridge();
+		void refreshToolCacheFromRegistry();
 
 		const adapter = new DurableEventAdapter();
 		let chain: Promise<void> = Promise.resolve();
@@ -239,6 +264,10 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				if (events.some((event) => event.type === "run_start")) {
 					running = true;
 					runStarts++;
+					// Cheap reconciliation: a silently-drifted stable tool set
+					// (e.g. setActiveTools without a registry refresh) would
+					// otherwise freeze the mirror (oldfox review #4).
+					reconcileToolBridge();
 				}
 				// Structural events the AgentEvent translation does not carry.
 				for (const event of events) {
@@ -328,6 +357,16 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 			void updateMeta(location.directory, { title: text.slice(0, 120) });
 		};
 
+		/** Queueing a registered extension command is an error, as in base. */
+		const rejectQueuedExtensionCommand = async (text: string): Promise<void> => {
+			if (!text.startsWith("/")) return;
+			const spaceIndex = text.indexOf(" ");
+			const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+			if (session.extensionRunner.getCommand(commandName) !== undefined) {
+				throw new Error(`Cannot queue extension command /${commandName} while the agent is working`);
+			}
+		};
+
 		const queueInput = async (text: string, behavior: "steer" | "followUp"): Promise<void> => {
 			// The parent's queue display: durable delivers the input as a user
 			// entry, whose message_start de-queues it again in the pipeline.
@@ -363,6 +402,13 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				if (promptOptions?.images !== undefined && promptOptions.images.length > 0) {
 					throw new Error("durable-p1: images are not supported yet (upstream tools/read limitation)");
 				}
+				// Extension commands ("/name args") execute immediately, exactly
+				// like the base prompt path (e.g. /mcp from the MCP manager).
+				// `expandPromptTemplates: false` disables the dispatch, as in base.
+				if (text.startsWith("/") && promptOptions?.expandPromptTemplates !== false) {
+					const handled = await internals.tryExecuteExtensionCommand(text);
+					if (handled) return;
+				}
 				if (compacting) {
 					throw new Error(
 						"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.",
@@ -388,6 +434,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				await submitIdle(handled.text);
 			},
 			steer: async (text: string): Promise<QueuedInputDisposition> => {
+				await rejectQueuedExtensionCommand(text);
 				const handled = await internals.runInputHandlers(text, "interactive", "steer");
 				if (handled === undefined) return "handled";
 				if (running) await queueInput(handled.text, "steer");
@@ -395,6 +442,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				return "queued";
 			},
 			followUp: async (text: string): Promise<QueuedInputDisposition> => {
+				await rejectQueuedExtensionCommand(text);
 				const handled = await internals.runInputHandlers(text, "interactive", "followUp");
 				if (handled === undefined) return "handled";
 				if (running) await queueInput(handled.text, "followUp");
@@ -547,7 +595,12 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				if (removals.length === 0) return;
 				void root
 					.configure({ tools: { remove: removals } }, context)
-					.then(() => refreshToolCacheFromRegistry())
+					.then(() => {
+						refreshToolCacheFromRegistry();
+						// Active-set changes bypass _refreshToolRegistry; keep the
+						// mirror honest (oldfox review C2).
+						reconcileToolBridge();
+					})
 					.catch((error) => console.error("[durable-p1] setActiveToolsByName failed:", error));
 			},
 			waitForIdle: async (): Promise<void> => {
