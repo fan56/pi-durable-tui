@@ -73,7 +73,11 @@ export default function sessionsExtension(pi: ExtensionAPI): void {
 			for (const session of sessions) {
 				const created = session.createdAt.slice(0, 16).replace("T", " ");
 				const title = (session.title ?? session.name ?? "(empty)").slice(0, 48);
-				const label = `${created}  ${title}`;
+				// The id tail keeps labels unique: two untitled sessions created
+				// in the same minute render identical otherwise, and byLabel
+				// would silently map both rows to whichever id was set last
+				// (picked row 1, switched to a different, unlocked session).
+				const label = `${created}  ${title}  ·${session.id.slice(-6)}`;
 				byLabel.set(label, session.id);
 				options.push(label);
 			}
