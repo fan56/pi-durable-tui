@@ -1,0 +1,5 @@
+# Build context exclusions for the e2e image (podman build context = repo root).
+.git
+**/node_modules
+**/.DS_Store
+.github

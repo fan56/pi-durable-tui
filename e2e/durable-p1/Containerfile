@@ -1,0 +1,61 @@
+# e2e image for the durable-p1 tmux suite (podman / linux/arm64 applehv VM).
+#
+# Workspace packages are NOT built: the runtime resolves @earendil-works/*
+# imports straight to TypeScript source via
+# packages/coding-agent/src/experimental/source-resolver.ts (reads
+# tsconfig.json paths relative to the repo copy in /repo).
+FROM docker.io/library/node:24-bookworm-slim
+
+# CN network reality: deb.debian.org (Fastly) stalls from this network, so
+# point apt at the tuna mirror before updating (both bookworm source formats).
+RUN sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' \
+		/etc/apt/sources.list.d/debian.sources \
+		&& apt-get update \
+		&& apt-get install -y --no-install-recommends tmux procps perl ripgrep fd-find \
+		&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
+		&& rm -rf /var/lib/apt/lists/*
+# perl: run.sh calls shasum(1). tmux panes must use bash, not dash: the suite
+# bakes printf '%q' output into pane commands ($'...' is not POSIX).
+# ripgrep/fd: pi downloads these on first boot otherwise — in-container the
+# download times out, "Startup is still in progress" never completes, and
+# every tool call hangs (chat-only scenarios still pass, masking it).
+# Debian ships the fd binary as fdfind, pi looks for `fd`.
+RUN echo 'set-option -g default-shell /bin/bash' > /root/.tmux.conf
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+WORKDIR /repo
+
+# Layer-cached dependency install: npm workspaces need every workspace's
+# package.json present before `npm ci`, so copy the metadata set first.
+COPY .npmrc package.json package-lock.json ./
+COPY packages/agent/package.json packages/agent/package.json
+COPY packages/ai/package.json packages/ai/package.json
+COPY packages/chord/package.json packages/chord/package.json
+COPY packages/client/package.json packages/client/package.json
+COPY packages/codemode/package.json packages/codemode/package.json
+COPY packages/coding-agent/package.json packages/coding-agent/package.json
+COPY packages/durable/package.json packages/durable/package.json
+COPY packages/env/package.json packages/env/package.json
+COPY packages/evals/package.json packages/evals/package.json
+COPY packages/mcp/package.json packages/mcp/package.json
+COPY packages/protocol/package.json packages/protocol/package.json
+COPY packages/server/package.json packages/server/package.json
+COPY packages/telemetry/package.json packages/telemetry/package.json
+COPY packages/tui/package.json packages/tui/package.json
+COPY packages/coding-agent/examples/extensions/with-deps/package.json packages/coding-agent/examples/extensions/with-deps/package.json
+COPY packages/coding-agent/examples/extensions/custom-provider-anthropic/package.json packages/coding-agent/examples/extensions/custom-provider-anthropic/package.json
+COPY packages/coding-agent/examples/extensions/custom-provider-gitlab-duo/package.json packages/coding-agent/examples/extensions/custom-provider-gitlab-duo/package.json
+COPY packages/coding-agent/examples/extensions/sandbox/package.json packages/coding-agent/examples/extensions/sandbox/package.json
+COPY packages/coding-agent/examples/extensions/gondolin/package.json packages/coding-agent/examples/extensions/gondolin/package.json
+RUN npm ci --ignore-scripts
+
+# Full repo source (.git / node_modules / .DS_Store / .github excluded via
+# e2e/durable-p1/.containerignore, passed with --ignorefile).
+COPY . .
+
+# Smoke: the suite entry must boot from source with zero host state (no
+# ~/.pi config, no dist builds). Fails the build loudly on any resolution gap.
+RUN node --import ./packages/coding-agent/src/experimental/source-resolver.ts \
+		./packages/coding-agent/src/experimental/durable-p1/main.ts --help
+
+CMD ["bash", "e2e/durable-p1/run.sh"]
