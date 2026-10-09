@@ -1,4 +1,4 @@
-// durable-p1: the "externally driven headless session" contract (wayfinder
+// durable-tui: the "externally driven headless session" contract (wayfinder
 // ticket 009, resolution 7). The facade runs a REAL AgentSession whose
 // in-process agent never receives a prompt; instead, durable watchEvents
 // batches are fed through the session's own event pipeline so persistence to
@@ -110,7 +110,7 @@ export function bindHeadlessInternals(session: AgentSession): HeadlessSessionCon
 				try {
 					callback();
 				} catch (error) {
-					console.error("[durable-p1] tool-registry refresh callback failed:", error);
+					console.error("[durable-tui] tool-registry refresh callback failed:", error);
 				}
 				return result;
 			};
@@ -127,7 +127,7 @@ export function bindHeadlessInternals(session: AgentSession): HeadlessSessionCon
 				(method: string) =>
 				(): never => {
 					throw new Error(
-						`durable-p1: pi.${method} is not supported here — the durable engine owns the conversation loop`,
+						`durable-tui: pi.${method} is not supported here — the durable engine owns the conversation loop`,
 					);
 				};
 			runtime.sendMessage = refuse("sendMessage");

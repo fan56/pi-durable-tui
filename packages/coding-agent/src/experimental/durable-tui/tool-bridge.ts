@@ -1,4 +1,4 @@
-// durable-p1: the extension tool bridge (v0.2). Stable extensions register
+// durable-tui: the extension tool bridge (v0.2). Stable extensions register
 // tools through `pi.registerTool`, which lands them in the AgentSession's own
 // tool registry — invisible to the durable engine, whose requests offer tools
 // from the durable Registry only. This bridge mirrors every ACTIVE bridged
@@ -200,7 +200,7 @@ export function createStableToolBridge(options: StableToolBridgeOptions): Stable
 					tools,
 				});
 			} catch (error) {
-				console.error("[durable-p1] tool bridge sync failed:", error);
+				console.error("[durable-tui] tool bridge sync failed:", error);
 			}
 		},
 	};

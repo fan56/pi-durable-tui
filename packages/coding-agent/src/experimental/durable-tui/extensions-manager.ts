@@ -1,4 +1,4 @@
-// durable-p1: the "/extensions" command — pick which global settings packages load
+// durable-tui: the "/extensions" command — pick which global settings packages load
 // at startup. First boot loads none of them (clean base + builtin MCP); /ext
 // toggles entries in a picker, persists the choice, appends newly selected
 // paths to the live resource loader, and reloads — so additions apply without
@@ -15,7 +15,7 @@ import { loadSelection, readGlobalPackages, resolveSelection, saveSelection } fr
 const DONE_ROW = "完成：保存并重载（新勾选立即生效）";
 const CANCEL_ROW = "取消：不保存退出";
 
-interface DurableP1Seam {
+interface DurableTuiSeam {
 	session: { addExtensionPaths(paths: string[]): void };
 	appliedExtensionPaths: Set<string>;
 }
@@ -56,7 +56,7 @@ export default function extensionsManagerExtension(pi: ExtensionAPI): void {
 
 			const names = packages.filter((p) => selected.has(p.name)).map((p) => p.name);
 			await saveSelection(names);
-			const seam = (globalThis as { __durableP1?: DurableP1Seam }).__durableP1;
+			const seam = (globalThis as { __durableTui?: DurableTuiSeam }).__durableTui;
 			const resolved = resolveSelection(names, packages);
 			if (seam === undefined) {
 				ctx.ui.notify(`已保存 ${names.length} 个扩展，重启 pi-durable-tui 后生效`, "info");
@@ -73,7 +73,7 @@ export default function extensionsManagerExtension(pi: ExtensionAPI): void {
 			try {
 				await ctx.reload();
 			} catch (error) {
-				console.error("[durable-p1] reload after /extensions failed:", error);
+				console.error("[durable-tui] reload after /extensions failed:", error);
 			}
 		},
 	});

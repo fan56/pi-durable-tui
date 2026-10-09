@@ -1,13 +1,13 @@
-# durable-p1 e2e
+# durable-tui e2e
 
 tmux 驱动真 TUI 的端到端验收套件：起真进程、走真模型（deepseek）、按场景按键注入 + 屏幕断言。这是 v0.1–v0.4 验收清单的可重复执行版，22 个场景。
 
 ## 跑法
 
 ```bash
-e2e/durable-p1/run.sh            # 全量
-e2e/durable-p1/run.sh --keep     # 失败时保留现场（lab 目录路径会打印）
-e2e/durable-p1/run.sh boot tool  # 只跑指定场景
+e2e/durable-tui/run.sh            # 全量
+e2e/durable-tui/run.sh --keep     # 失败时保留现场（lab 目录路径会打印）
+e2e/durable-tui/run.sh boot tool  # 只跑指定场景
 ```
 
 前置：
@@ -19,15 +19,15 @@ e2e/durable-p1/run.sh boot tool  # 只跑指定场景
 ## podman 容器内跑（Linux 环境）
 
 ```bash
-e2e/durable-p1/podman-e2e.sh              # 构建镜像 + 容器内全量
-e2e/durable-p1/podman-e2e.sh boot tool    # 场景过滤透传
-PODMAN_E2E_GLOBAL_SETTINGS=1 e2e/durable-p1/podman-e2e.sh   # 连全局 settings 一起挂载（默认关）
+e2e/durable-tui/podman-e2e.sh              # 构建镜像 + 容器内全量
+e2e/durable-tui/podman-e2e.sh boot tool    # 场景过滤透传
+PODMAN_E2E_GLOBAL_SETTINGS=1 e2e/durable-tui/podman-e2e.sh   # 连全局 settings 一起挂载（默认关）
 ```
 
 - 套件作为容器命令整体运行：tmux server 与套件同生命周期（分次 `podman exec` 不共享 tmux server，不可取）
 - 挂载：`~/.pi/agent/auth.json`（只读，凭据）+ `~/repo/pi-powerline-footer`（只读，存在才挂）。durable 会话数据写容器内 `/root/.pi/agent/...`，随容器销毁
 - 镜像内 apt 装 ripgrep/fd（Debian 的 fd 二进制叫 `fdfind`，已补 `fd` 符号链接）：否则 pi 首启在容器里自动下载二进制会超时，"Startup is still in progress" 永不完成，所有工具调用挂死——纯对话场景照常通过，极易误诊
-- `--keep` 在容器模式下被忽略（现场随容器消失；取证用 `podman run --name X ... bash e2e/durable-p1/run.sh --keep <场景>` 再 `podman export` 挖现场，容器内 `/tmp` 有符号链接坑，`podman cp` 不可用）
+- `--keep` 在容器模式下被忽略（现场随容器消失；取证用 `podman run --name X ... bash e2e/durable-tui/run.sh --keep <场景>` 再 `podman export` 挖现场，容器内 `/tmp` 有符号链接坑，`podman cp` 不可用）
 - 本网络 docker.io 被 DNS 污染，基镜像需一次性引导：
 
 ```bash
@@ -68,7 +68,7 @@ podman tag  docker.m.daocloud.io/library/node:24-bookworm-slim docker.io/library
 
 ## 现场与清理
 
-每次运行建独立 lab（mktemp），内含 `.pi/settings.json`（默认模型 + 验收用压缩阈值）与 `.pi/mcp.json`（内嵌 echo/add 测试服务器，exposure: direct）。durable 会话数据落在 `~/.pi/agent/experimental/durable-p1-sessions/<hash>/`，退出时连同 lab 一并删除（`--keep` 保留）。失败场景的屏幕快照存 `$LAB/<场景名>.pane`。
+每次运行建独立 lab（mktemp），内含 `.pi/settings.json`（默认模型 + 验收用压缩阈值）与 `.pi/mcp.json`（内嵌 echo/add 测试服务器，exposure: direct）。durable 会话数据落在 `~/.pi/agent/experimental/durable-tui-sessions/<hash>/`，退出时连同 lab 一并删除（`--keep` 保留）。失败场景的屏幕快照存 `$LAB/<场景名>.pane`。
 
 ## 已知约束
 

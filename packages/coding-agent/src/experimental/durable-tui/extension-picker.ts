@@ -18,8 +18,10 @@ export interface PackageEntry {
 export function extensionSelectionPath(): string {
 	const override = process.env.PI_DURABLE_EXT_CONFIG;
 	if (override !== undefined && override !== "") return override;
-	return join(getAgentDir(), "durable-p1-extensions.json");
+	return join(getAgentDir(), "durable-tui-extensions.json");
 }
+
+const LEGACY_EXTENSION_SELECTION_PATH = () => join(getAgentDir(), "durable-p1-extensions.json");
 
 /** String package sources from the GLOBAL settings file, resolved + existing. */
 export async function readGlobalPackages(): Promise<PackageEntry[]> {
@@ -49,12 +51,20 @@ export async function readGlobalPackages(): Promise<PackageEntry[]> {
 }
 
 export async function loadSelection(): Promise<string[] | undefined> {
-	let raw: string;
-	try {
-		raw = await readFile(extensionSelectionPath(), "utf8");
-	} catch {
-		return undefined;
+	// An explicit PI_DURABLE_EXT_CONFIG is authoritative isolation (e2e labs):
+	// a missing file there means "no selection" — never fall through to the
+	// global paths, or the developer's real selection leaks into every lab.
+	const overridden = process.env.PI_DURABLE_EXT_CONFIG !== undefined && process.env.PI_DURABLE_EXT_CONFIG !== "";
+	let raw = await readFile(extensionSelectionPath(), "utf8").catch(() => undefined);
+	if (raw === undefined && !overridden) {
+		// Pre-rename file → carry the choice over once, then read the new path.
+		const legacy = await readFile(LEGACY_EXTENSION_SELECTION_PATH(), "utf8").catch(() => undefined);
+		if (legacy !== undefined) {
+			raw = legacy;
+			await writeFile(extensionSelectionPath(), legacy).catch(() => {});
+		}
 	}
+	if (raw === undefined) return undefined;
 	try {
 		const parsed = JSON.parse(raw) as { selected?: unknown };
 		return Array.isArray(parsed.selected) ? parsed.selected.filter((n): n is string => typeof n === "string") : undefined;

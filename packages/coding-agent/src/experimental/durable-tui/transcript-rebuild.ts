@@ -1,4 +1,4 @@
-// durable-p1: rebuild a stable SessionManager transcript (header + SessionEntry
+// durable-tui: rebuild a stable SessionManager transcript (header + SessionEntry
 // chain) from a durable conversation's active entries, so the stock TUI renders
 // history on `--continue` and session stats/usage read the real transcript
 // (wayfinder ticket 009, resolution 6, gap 1).

@@ -1,14 +1,14 @@
 #!/bin/bash
-# e2e for durable-p1: drives the real TUI in tmux through the acceptance
+# e2e for durable-tui: drives the real TUI in tmux through the acceptance
 # scenarios (real model via ~/.pi/agent/auth.json or DEEPSEEK_API_KEY).
-# Usage: e2e/durable-p1/run.sh [--keep]   (--keep preserves the lab dir on exit)
+# Usage: e2e/durable-tui/run.sh [--keep]   (--keep preserves the lab dir on exit)
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ENTRY="$REPO_ROOT/packages/coding-agent/src/experimental/durable-p1/main.ts"
+ENTRY="$REPO_ROOT/packages/coding-agent/src/experimental/durable-tui/main.ts"
 RESOLVER="$REPO_ROOT/packages/coding-agent/src/experimental/source-resolver.ts"
 MCP_BUILTIN="$REPO_ROOT/packages/coding-agent/src/extensions/mcp/index.ts"
-MCP_FIXTURE="$REPO_ROOT/e2e/durable-p1/fixtures/mcp-server.mjs"
+MCP_FIXTURE="$REPO_ROOT/e2e/durable-tui/fixtures/mcp-server.mjs"
 [ -f "$ENTRY" ] || { echo "FATAL: entry not found at $ENTRY" >&2; exit 2; }
 [ -f "$MCP_FIXTURE" ] || { echo "FATAL: MCP fixture missing" >&2; exit 2; }
 
@@ -87,7 +87,7 @@ tui_dead() { grep -q "^EXITED$" "$LAB/$1.err" 2>/dev/null; }
 
 tui_kill() { t kill-session -t "$1" 2>/dev/null || true; }
 
-TUI_NAMES="boot tool mcp mcpcmd compact steer mswitch killu cont list sess sflag footer abort queue think nm snew lockA lockB bbash terr ccnt ext extb"
+TUI_NAMES="boot tool mcp mcpcmd compact steer mswitch killu cont list sess sflag footer abort queue think nm snew lockA lockB bbash terr ccnt ext extb lloss"
 
 kill_all_tuis() {
 	local name
@@ -157,7 +157,7 @@ cat >"$LAB/.pi/mcp.json" <<EOF
 }
 EOF
 # The per-cwd durable sessions root (hash of the lab path), removed on exit.
-SESSIONS_ROOT="$HOME/.pi/agent/experimental/durable-p1-sessions/$(realpath "$LAB" | shasum -a 256 | cut -c1-24)"
+SESSIONS_ROOT="$HOME/.pi/agent/experimental/durable-tui-sessions/$(realpath "$LAB" | shasum -a 256 | cut -c1-24)"
 
 BOOT_ARGS=(-ne -e "$MCP_BUILTIN")
 
@@ -256,7 +256,7 @@ s_cont() {
 
 s_list() {
 	(cd "$LAB" && node --import "$RESOLVER" "$ENTRY" --list >"$LAB/list.out" 2>"$LAB/list.err")
-	grep -q "No durable-p1 sessions" "$LAB/list.out" && return 1
+	grep -q "No durable-tui sessions" "$LAB/list.out" && return 1
 	grep -qE "^[0-9]{4}-" "$LAB/list.out" || return 1
 	return 0
 }
@@ -275,6 +275,30 @@ rows = [os.path.basename(p) for p in pkgs if isinstance(p, str) and os.path.isdi
 if "pi-powerline-footer" in rows:
     print(rows.index("pi-powerline-footer"), len(rows))
 PY
+}
+
+s_lockloss() {
+	# external lock removal must degrade to a warning, never crash the TUI
+	# (2026-10-09 live crash: proper-lockfile's refresher stat ENOENT)
+	tui_start lloss "${BOOT_ARGS[@]}"
+	tui_expect lloss 60 "deepseek-flash" || return 1
+	local root real lockdir
+	real="$(cd "$LAB" && pwd -P)"
+	root="$(python3 -c "import hashlib,sys;print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:24])" "$real")"
+	# newest session = this TUI's; earlier scenarios can leave orphan locks behind
+	lockdir="$(ls -d "$HOME/.pi/agent/experimental/durable-tui-sessions/$root"/*.lock 2>/dev/null | sort | tail -1)"
+	[ -n "$lockdir" ] || return 1
+	rm -rf "$lockdir"
+	# the downgrade warning lands on stderr, not the pane
+	local wl=0
+	while [ $wl -lt 15 ]; do
+		grep -q "without lock protection" "$LAB/lloss.err" 2>/dev/null && break
+		sleep 2; wl=$((wl+2))
+	done
+	[ $wl -lt 15 ] || return 1
+	tui_keys lloss "Reply with exactly: lockloss-ok"; sleep 1; tui_keys lloss Enter
+	tui_expect lloss 90 "lockloss-ok" || return 1
+	if tui_dead lloss; then return 1; fi
 }
 
 s_extpick() {
@@ -493,6 +517,7 @@ if [ -f "$HOME/repo/pi-powerline-footer/index.ts" ]; then
 else
 	skip_scenario footer "fixture ~/repo/pi-powerline-footer not present"
 fi
+want lockloss && scenario lockloss s_lockloss lloss
 if [ -n "$(ext_pkg_rows)" ]; then
 	want extpick && scenario extpick s_extpick ext
 	want extboot && scenario extboot s_extboot extb

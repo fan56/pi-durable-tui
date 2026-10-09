@@ -1,4 +1,4 @@
-// durable-p1 spike: translates the durable agent event stream (packages/durable
+// durable-tui spike: translates the durable agent event stream (packages/durable
 // src/harness/events.ts, spec §9.4) into pi-agent-core AgentEvents that
 // AgentSession._handleAgentEvent and the interactive TUI already understand.
 

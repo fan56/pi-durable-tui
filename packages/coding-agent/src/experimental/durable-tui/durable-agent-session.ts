@@ -1,4 +1,4 @@
-// durable-p1 (wayfinder tickets 006 route B + 009): the production facade that
+// durable-tui (wayfinder tickets 006 route B + 009): the production facade that
 // runs the STABLE interactive-mode TUI on the durable Harness. A real
 // AgentSession (in-memory SessionManager, real services, engine never runs) is
 // driven externally: turn-surface calls (prompt/steer/followUp/abort/compact/
@@ -47,18 +47,18 @@ import {
 import { Subagent } from "../durable/subagent.ts";
 import { DurableEventAdapter } from "./event-adapter.ts";
 import { bindHeadlessInternals, type HeadlessSessionContract } from "./headless-session.ts";
-import { selectP1Session, selectP1SessionById } from "./session-location.ts";
+import { selectTuiSession, selectTuiSessionById } from "./session-location.ts";
 import {
-	getCurrentP1SessionId,
+	getCurrentTuiSessionId,
 	readMeta,
-	setCurrentP1SessionId,
+	setCurrentTuiSessionId,
 	updateMeta,
 	writeInitialMeta,
 } from "./session-meta.ts";
 import { createStableToolBridge } from "./tool-bridge.ts";
 import { rebuildTranscript } from "./transcript-rebuild.ts";
 
-export interface DurableP1SessionOptions {
+export interface DurableTuiSessionOptions {
 	/** Working directory for the agent and session lookup. */
 	cwd: string;
 	/** Attach the newest existing session for cwd instead of creating one. */
@@ -73,13 +73,13 @@ export interface DurableP1SessionOptions {
 	extraExtensions?: string[];
 }
 
-export interface DurableP1Session {
+export interface DurableTuiSession {
 	session: AgentSession;
 	services: AgentSessionServices;
 	/** From createAgentSessionFromServices; the runtime factory must return it. */
 	extensionsResult: unknown;
 	modelFallbackMessage: string | undefined;
-	/** Durable directory id (`selectP1Session*` location id) — resume with --session. */
+	/** Durable directory id (`selectTuiSession*` location id) — resume with --session. */
 	locationId: string;
 	/** A factory that throws: /new, /resume, /fork, and import stay out of v0.1 scope. */
 	throwingRuntimeFactory: () => Promise<never>;
@@ -92,12 +92,12 @@ interface QueuedInput {
 	submission: Submission | undefined;
 }
 
-export async function createDurableP1Session(options: DurableP1SessionOptions): Promise<DurableP1Session> {
+export async function createDurableTuiSession(options: DurableTuiSessionOptions): Promise<DurableTuiSession> {
 	const context = BACKGROUND_CONTEXT;
 	const location =
 		options.sessionId === undefined
-			? await selectP1Session(options.cwd, options.continueSession)
-			: await selectP1SessionById(options.cwd, options.sessionId);
+			? await selectTuiSession(options.cwd, options.continueSession)
+			: await selectTuiSessionById(options.cwd, options.sessionId);
 	let closed = false;
 	let target: AgentSession | undefined;
 	let harnessClose: (() => Promise<void>) | undefined;
@@ -132,7 +132,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				registry,
 				settings: createHarnessSettings(services.settingsManager),
 				env: envs.env,
-				onReport: (error) => console.error("[durable-p1] harness:", error),
+				onReport: (error) => console.error("[durable-tui] harness:", error),
 			},
 			context,
 		);
@@ -196,7 +196,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 		target = created.session;
 		const session = target;
 		const internals: HeadlessSessionContract = bindHeadlessInternals(target);
-		setCurrentP1SessionId(location.id);
+		setCurrentTuiSessionId(location.id);
 		await writeInitialMeta(location);
 		// The title latch must be durable, not per-facade-instance: switching
 		// back to an old session and prompting must not overwrite its title.
@@ -204,7 +204,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 		// Extension-driven pi.sendMessage would race the durable engine on the
 		// same SessionManager; refuse it loudly instead (oldfox review #3).
 		if (!internals.guardExtensionLlmCalls()) {
-			console.error("[durable-p1] could not guard pi.sendMessage (upstream runner shape changed?)");
+			console.error("[durable-tui] could not guard pi.sendMessage (upstream runner shape changed?)");
 		}
 
 		// v0.2 tool bridge: mirror every ACTIVE bridged stable tool (the
@@ -244,7 +244,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 			try {
 				refreshToolCache((await root.agent(context)).tools);
 			} catch (error) {
-				console.error("[durable-p1] tool cache refresh failed:", error);
+				console.error("[durable-tui] tool cache refresh failed:", error);
 			}
 		};
 		registry.subscribe(() => void refreshToolCacheFromRegistry());
@@ -368,7 +368,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				}
 				void deliveryContext;
 			});
-			chain = run.catch((error) => console.error("[durable-p1] event ingestion failed:", error));
+			chain = run.catch((error) => console.error("[durable-tui] event ingestion failed:", error));
 			return chain;
 		});
 
@@ -421,7 +421,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 		const overrides: Record<string, unknown> = {
 			prompt: async (text: string, promptOptions?: PromptOptions): Promise<void> => {
 				if (promptOptions?.images !== undefined && promptOptions.images.length > 0) {
-					throw new Error("durable-p1: images are not supported yet (upstream tools/read limitation)");
+					throw new Error("durable-tui: images are not supported yet (upstream tools/read limitation)");
 				}
 				// Extension commands ("/name args") execute immediately, exactly
 				// like the base prompt path (e.g. /mcp from the MCP manager).
@@ -506,7 +506,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 					const outcome = receipt.state.outcome;
 					if (outcome.status === "aborted") throw new Error("Compaction cancelled");
 					if (outcome.status !== "completed") {
-						throw new Error(`durable-p1: compaction ${outcome.status}`);
+						throw new Error(`durable-tui: compaction ${outcome.status}`);
 					}
 					// The summary entry arrives through the ingest stream (write
 					// submission placement); fall back to a newest-first scan.
@@ -519,7 +519,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 						const page = await root.entries({ order: "descending" }, 16, undefined, context);
 						entry = page.items.find((candidate) => candidate.kind === "pi.compaction");
 					}
-					if (entry === undefined) throw new Error("durable-p1: compaction summary entry not found");
+					if (entry === undefined) throw new Error("durable-tui: compaction summary entry not found");
 					const result = materializeCompaction(entry, tokensBefore);
 					internals.emitSessionEvent({
 						type: "compaction_end",
@@ -622,7 +622,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 						// mirror honest (oldfox review C2).
 						reconcileToolBridge();
 					})
-					.catch((error) => console.error("[durable-p1] setActiveToolsByName failed:", error));
+					.catch((error) => console.error("[durable-tui] setActiveToolsByName failed:", error));
 			},
 			waitForIdle: async (): Promise<void> => {
 				while (running || compacting) await sleep(100);
@@ -634,7 +634,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				const loader = services.resourceLoader as unknown as { additionalExtensionPaths?: string[] };
 				if (!Array.isArray(loader.additionalExtensionPaths)) {
 					throw new Error(
-						"durable-p1: resource loader no longer exposes additionalExtensionPaths (upstream change?)",
+						"durable-tui: resource loader no longer exposes additionalExtensionPaths (upstream change?)",
 					);
 				}
 				loader.additionalExtensionPaths.push(...paths);
@@ -669,7 +669,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 				try {
 					await step();
 				} catch (error) {
-					console.error("[durable-p1] close step failed:", error);
+					console.error("[durable-tui] close step failed:", error);
 				}
 			}
 		}
@@ -678,7 +678,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 		harness.resume();
 		const throwingRuntimeFactory = async (): Promise<never> => {
 			throw new Error(
-				"durable-p1: /new, /resume, /fork, and import are planned for v0.4 (session management)",
+				"durable-tui: /new, /resume, /fork, and import are planned for v0.4 (session management)",
 			);
 		};
 		return {

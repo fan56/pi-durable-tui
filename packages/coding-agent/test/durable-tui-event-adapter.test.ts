@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { DurableEventAdapter } from "../src/experimental/durable-p1/event-adapter.ts";
+import { DurableEventAdapter } from "../src/experimental/durable-tui/event-adapter.ts";
 import type { AgentEvent as DurableEvent } from "@earendil-works/pi-durable";
 
 type AnyEvent = Record<string, unknown> & { type: string };

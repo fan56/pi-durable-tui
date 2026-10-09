@@ -1,10 +1,10 @@
-// durable-p1: the "/sessions" command — the durable session picker (v0.4).
+// durable-tui: the "/sessions" command — the durable session picker (v0.4).
 // The stock /resume selector lists stable JSONL sessions and switches through
 // SessionManager.open, which cannot see durable SQLite sessions; this command
 // lists our session.json sidecars instead and switches by passing a carrier
 // path (a nonexistent "<session-dir>/carrier.jsonl") through
 // ExtensionCommandContext.switchSession. The runtime factory recognizes the
-// durable-p1-sessions path prefix and attaches that session by id —
+// durable-tui-sessions path prefix and attaches that session by id —
 // SessionManager.open tolerates the missing file, so the carrier needs no
 // bytes on disk.
 //
@@ -14,9 +14,9 @@
 
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import lockfile from "proper-lockfile";
+import { isSessionDirectoryLocked } from "./lock.ts";
 import type { ExtensionAPI, ExtensionCommandContext } from "../../core/extensions/types.ts";
-import { p1SessionsRoot } from "./session-location.ts";
+import { tuiSessionsRoot } from "./session-location.ts";
 import { listSessions } from "./session-meta.ts";
 
 const CARRIER_NAME = "carrier.jsonl";
@@ -26,22 +26,17 @@ async function validateSwitchTarget(directory: string): Promise<string | undefin
 	if (!(await stat(join(directory, "session.sqlite")).then(() => true).catch(() => false))) {
 		return "That session has no database file";
 	}
-	try {
-		const release = await lockfile.lock(directory, {
-			realpath: false,
-			retries: { retries: 0 },
-			stale: 0,
-		});
-		await release();
-		return undefined;
-	} catch {
+	// Probe only — never acquires, so it can never steal the lock out from
+	// under a live owner (proper-lockfile's stale-steal did exactly that).
+	if (await isSessionDirectoryLocked(directory)) {
 		return "That session is open in another process";
 	}
+	return undefined;
 }
 
 /** Recognize a switchSession carrier pointing into our sessions root. */
 export function durableIdFromCarrierPath(path: string, cwd: string): string | undefined {
-	const root = p1SessionsRoot(cwd);
+	const root = tuiSessionsRoot(cwd);
 	if (!path.startsWith(`${root}/`) || !path.endsWith(`/${CARRIER_NAME}`)) return undefined;
 	const id = path.slice(root.length + 1, path.length - CARRIER_NAME.length - 1);
 	return /^\d{13}-[0-9a-f-]{36}$/u.test(id) ? id : undefined;
@@ -61,7 +56,7 @@ export default function sessionsExtension(pi: ExtensionAPI): void {
 			// by its durable conversation id via the session manager instead.
 			// Set by the facade through the process env (jiti instances share it).
 			const current = process.env.PI_DURABLE_SESSION_ID;
-			const sessions = (await listSessions(p1SessionsRoot(ctx.cwd))).filter(
+			const sessions = (await listSessions(tuiSessionsRoot(ctx.cwd))).filter(
 				(session) => session.id !== current,
 			);
 			if (sessions.length === 0) {
@@ -85,7 +80,7 @@ export default function sessionsExtension(pi: ExtensionAPI): void {
 			if (picked === undefined) return;
 			const id = byLabel.get(picked);
 			if (id === undefined) return;
-			const directory = join(p1SessionsRoot(ctx.cwd), id);
+			const directory = join(tuiSessionsRoot(ctx.cwd), id);
 			// Validate BEFORE switching: switchSession tears the live session
 			// down before the replacement factory runs, so a dead target must
 			// refuse here instead of leaving a disposed TUI behind.

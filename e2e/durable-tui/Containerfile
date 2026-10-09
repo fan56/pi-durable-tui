@@ -1,4 +1,4 @@
-# e2e image for the durable-p1 tmux suite (podman / linux/arm64 applehv VM).
+# e2e image for the durable-tui tmux suite (podman / linux/arm64 applehv VM).
 #
 # Workspace packages are NOT built: the runtime resolves @earendil-works/*
 # imports straight to TypeScript source via
@@ -50,12 +50,12 @@ COPY packages/coding-agent/examples/extensions/gondolin/package.json packages/co
 RUN npm ci --ignore-scripts
 
 # Full repo source (.git / node_modules / .DS_Store / .github excluded via
-# e2e/durable-p1/.containerignore, passed with --ignorefile).
+# e2e/durable-tui/.containerignore, passed with --ignorefile).
 COPY . .
 
 # Smoke: the suite entry must boot from source with zero host state (no
 # ~/.pi config, no dist builds). Fails the build loudly on any resolution gap.
 RUN node --import ./packages/coding-agent/src/experimental/source-resolver.ts \
-		./packages/coding-agent/src/experimental/durable-p1/main.ts --help
+		./packages/coding-agent/src/experimental/durable-tui/main.ts --help
 
-CMD ["bash", "e2e/durable-p1/run.sh"]
+CMD ["bash", "e2e/durable-tui/run.sh"]

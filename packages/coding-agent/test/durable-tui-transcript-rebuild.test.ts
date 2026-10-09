@@ -3,12 +3,14 @@ import { SessionManager } from "../src/core/session-manager.ts";
 import {
 	rebuildTranscript,
 	unwrapCompactionSummary,
-} from "../src/experimental/durable-p1/transcript-rebuild.ts";
+} from "../src/experimental/durable-tui/transcript-rebuild.ts";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 
-/** Minimal durable EntryRecord fixture. */
-function entry(fields: Partial<EntryRecord> & Pick<EntryRecord, "id" | "kind">): EntryRecord {
-	return { conversationId: "conv-1", ...fields } as EntryRecord;
+/** Minimal durable EntryRecord fixture (loose fields on purpose: the branded
+ * id/message types are upstream-internal; only rebuildTranscript's runtime
+ * shape matters here). */
+function entry(fields: object): EntryRecord {
+	return { conversationId: "conv-1", ...fields } as unknown as EntryRecord;
 }
 
 function userMessage(text: string) {
@@ -51,7 +53,7 @@ describe("rebuildTranscript", () => {
 		expect(rebuilt.stats).toEqual({ mapped: 3, skipped: 2 });
 		expect(rebuilt.fileEntries).toHaveLength(4); // header + 3
 
-		const [header, ...chain] = rebuilt.fileEntries as [Record<string, unknown>, ...Record<string, unknown>[]];
+		const [header, ...chain] = rebuilt.fileEntries as unknown as [Record<string, unknown>, ...Record<string, unknown>[]];
 		expect(header["type"]).toBe("session");
 		expect(header["id"]).toBe("conv-1");
 		expect(header["cwd"]).toBe("/tmp/lab");

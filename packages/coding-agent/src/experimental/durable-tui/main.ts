@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// durable-p1 entry: boot the STABLE interactive-mode TUI on the durable
+// durable-tui entry: boot the STABLE interactive-mode TUI on the durable
 // Harness through the AgentSession facade (wayfinder tickets 006/009).
 //
 // A deliberate subset of stable's flags:
@@ -21,24 +21,24 @@ import {
 import { InteractiveMode } from "../../modes/interactive/interactive-mode.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "../../modes/interactive/theme/theme.ts";
 import { validateThemeJson } from "../../modes/interactive/theme/theme-json.ts";
-import { createDurableP1Session } from "./durable-agent-session.ts";
+import { createDurableTuiSession } from "./durable-agent-session.ts";
 import { loadSelection, readGlobalPackages, resolveSelection } from "./extension-picker.ts";
-import { p1SessionsRoot } from "./session-location.ts";
+import { migrateLegacySessionsRoot, tuiSessionsRoot } from "./session-location.ts";
 import { listSessions } from "./session-meta.ts";
 import { durableIdFromCarrierPath } from "./sessions-extension.ts";
 
-type P1 = Awaited<ReturnType<typeof createDurableP1Session>>;
-function toRuntimeResult(p1: P1): CreateAgentSessionRuntimeResult {
+type TuiSession = Awaited<ReturnType<typeof createDurableTuiSession>>;
+function toRuntimeResult(tui: TuiSession): CreateAgentSessionRuntimeResult {
 	return {
-		session: p1.session,
-		extensionsResult: p1.extensionsResult as CreateAgentSessionRuntimeResult["extensionsResult"],
-		modelFallbackMessage: p1.modelFallbackMessage,
-		services: p1.services,
+		session: tui.session,
+		extensionsResult: tui.extensionsResult as CreateAgentSessionRuntimeResult["extensionsResult"],
+		modelFallbackMessage: tui.modelFallbackMessage,
+		services: tui.services,
 		diagnostics: [],
 	};
 }
 
-interface P1Args {
+interface TuiArgs {
 	continueSession: boolean;
 	sessionId: string | undefined;
 	provider: string | undefined;
@@ -48,8 +48,8 @@ interface P1Args {
 	list: boolean;
 }
 
-function parseArgs(argv: readonly string[]): P1Args {
-	const args: P1Args = {
+function parseArgs(argv: readonly string[]): TuiArgs {
+	const args: TuiArgs = {
 		continueSession: false,
 		sessionId: undefined,
 		provider: undefined,
@@ -63,7 +63,7 @@ function parseArgs(argv: readonly string[]): P1Args {
 		const value = () => {
 			const next = argv[++i];
 			if (next === undefined) {
-				console.error(`durable-p1: ${arg} requires a value`);
+				console.error(`durable-tui: ${arg} requires a value`);
 				process.exit(1);
 			}
 			return next;
@@ -104,7 +104,7 @@ function parseArgs(argv: readonly string[]): P1Args {
 				if (arg.startsWith("--provider=")) args.provider = arg.slice("--provider=".length);
 				else if (arg.startsWith("--model=")) args.model = arg.slice("--model=".length);
 				else {
-					console.error(`durable-p1: unknown argument ${arg}`);
+					console.error(`durable-tui: unknown argument ${arg}`);
 					process.exit(1);
 				}
 		}
@@ -114,6 +114,9 @@ function parseArgs(argv: readonly string[]): P1Args {
 
 const args = parseArgs(process.argv.slice(2));
 const cwd = realpathSync(process.cwd());
+// Carry pre-rename sessions (durable-p1-sessions) over before anything reads
+// the sessions root — --list, clean boots, and full-mode boots all attach.
+migrateLegacySessionsRoot();
 
 // --- startup extension selection ---------------------------------------------
 // First boot: no selection file → none of the global packages load (clean
@@ -128,7 +131,7 @@ if (!args.list && args.noExtensions) {
 	if (saved !== undefined && saved.length > 0) {
 		const resolved = resolveSelection(saved, globalPackages);
 		for (const dropped of saved.filter((n) => !resolved.some((r) => r.name === n))) {
-			console.error(`durable-p1: saved extension "${dropped}" is not in global settings anymore — skipped`);
+			console.error(`durable-tui: saved extension "${dropped}" is not in global settings anymore — skipped`);
 		}
 		appliedExtensionPaths = resolved.map((r) => r.path);
 		args.extraExtensions.push(...appliedExtensionPaths);
@@ -136,9 +139,9 @@ if (!args.list && args.noExtensions) {
 }
 
 if (args.list) {
-	const sessions = await listSessions(p1SessionsRoot(cwd));
+	const sessions = await listSessions(tuiSessionsRoot(cwd));
 	if (sessions.length === 0) {
-		console.log(`No durable-p1 sessions recorded for ${cwd}`);
+		console.log(`No durable-tui sessions recorded for ${cwd}`);
 	} else {
 		for (const session of sessions) {
 			const name = session.name === undefined ? "" : `  name: ${session.name}`;
@@ -163,22 +166,22 @@ const sessionFlags = {
 		new URL("./extensions-manager.ts", import.meta.url).pathname,
 	],
 };
-const p1 = await createDurableP1Session({
+const tui = await createDurableTuiSession({
 	...sessionFlags,
 	continueSession: args.continueSession,
 	...(args.sessionId === undefined ? {} : { sessionId: args.sessionId }),
 });
 // The /extensions command (jiti module) reaches back for append-only extension
 // loading through this seam — objects cannot travel via process.env.
-(globalThis as { __durableP1?: unknown }).__durableP1 = {
-	session: p1.session,
+(globalThis as { __durableTui?: unknown }).__durableTui = {
+	session: tui.session,
 	appliedExtensionPaths: new Set(appliedExtensionPaths),
 };
 setThemeJsonValidator(validateThemeJson);
-initTheme(p1.services.settingsManager.getTheme(), true);
-setCapabilityOverrides(p1.services.settingsManager.getTerminalCapabilityOverrides());
-for (const diagnostic of p1.services.diagnostics) {
-	if (diagnostic.type !== "info") console.error(`[durable-p1] ${diagnostic.type}: ${diagnostic.message}`);
+initTheme(tui.services.settingsManager.getTheme(), true);
+setCapabilityOverrides(tui.services.settingsManager.getTerminalCapabilityOverrides());
+for (const diagnostic of tui.services.diagnostics) {
+	if (diagnostic.type !== "info") console.error(`[durable-tui] ${diagnostic.type}: ${diagnostic.message}`);
 }
 
 // The real runtime factory: /new and the /sessions picker switch durable
@@ -187,7 +190,7 @@ for (const diagnostic of p1.services.diagnostics) {
 // silently creating an unrelated durable session.
 // currentLocationId tracks the LIVE session across switches so the exit hint
 // resumes what the user was last in, not the boot-time session.
-let currentLocationId = p1.locationId;
+let currentLocationId = tui.locationId;
 // InteractiveMode's quit path ends in process.exit(0), so a finally block
 // would never run. Node runs synchronous "exit" listeners on process.exit —
 // that's our only reliable hook for the resume hint.
@@ -201,27 +204,27 @@ const runtimeFactory: CreateAgentSessionRuntimeFactory = async (options) => {
 		const id = durableIdFromCarrierPath(file ?? "", options.cwd);
 		if (id === undefined) {
 			throw new Error(
-				"durable-p1: switching to non-durable sessions is not supported here — use /sessions to pick a durable session",
+				"durable-tui: switching to non-durable sessions is not supported here — use /sessions to pick a durable session",
 			);
 		}
-		const next = await createDurableP1Session({ ...sessionFlags, continueSession: false, sessionId: id });
+		const next = await createDurableTuiSession({ ...sessionFlags, continueSession: false, sessionId: id });
 		currentLocationId = next.locationId;
 		return toRuntimeResult(next);
 	}
 	if (reason === "fork") {
-		throw new Error("durable-p1: cross-store fork is not supported yet (planned)");
+		throw new Error("durable-tui: cross-store fork is not supported yet (planned)");
 	}
 	// "new": a fresh durable session directory.
-	const next = await createDurableP1Session({ ...sessionFlags, continueSession: false });
+	const next = await createDurableTuiSession({ ...sessionFlags, continueSession: false });
 	currentLocationId = next.locationId;
 	return toRuntimeResult(next);
 };
-const runtime = new AgentSessionRuntime(p1.session, p1.services, runtimeFactory);
+const runtime = new AgentSessionRuntime(tui.session, tui.services, runtimeFactory);
 try {
-	const interactiveMode = new InteractiveMode(runtime, { modelFallbackMessage: p1.modelFallbackMessage });
+	const interactiveMode = new InteractiveMode(runtime, { modelFallbackMessage: tui.modelFallbackMessage });
 	await interactiveMode.run();
 } finally {
-	await p1.close();
+	await tui.close();
 	stopThemeWatcher();
 }
 

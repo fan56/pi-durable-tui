@@ -1,10 +1,10 @@
 #!/bin/bash
-# podman harness for the durable-p1 e2e suite: builds the e2e image and runs
+# podman harness for the durable-tui e2e suite: builds the e2e image and runs
 # the whole tmux suite inside ONE container (the suite is the container
 # command, so the tmux server lives for the entire run — separate podman execs
 # would not share it).
 #
-# Usage: e2e/durable-p1/podman-e2e.sh [scenario...]
+# Usage: e2e/durable-tui/podman-e2e.sh [scenario...]
 #   scenario names pass through to run.sh (e.g. `boot`, `boot tool`).
 #   --keep is accepted but ignored: the lab dir lives and dies with the
 #   container, there is nothing on the host to preserve.
@@ -100,11 +100,11 @@ if ! podman image exists "$BASE"; then
 fi
 echo "==> podman build $IMAGE"
 podman build --pull-never \
-	--ignorefile "$REPO_ROOT/e2e/durable-p1/.containerignore" \
-	-t "$IMAGE" -f "$REPO_ROOT/e2e/durable-p1/Containerfile" "$REPO_ROOT"
+	--ignorefile "$REPO_ROOT/e2e/durable-tui/.containerignore" \
+	-t "$IMAGE" -f "$REPO_ROOT/e2e/durable-tui/Containerfile" "$REPO_ROOT"
 
 # --- run: one container, suite as the command --------------------------------
-echo "==> podman run: bash e2e/durable-p1/run.sh ${ARGS[*]:-(full suite)}"
+echo "==> podman run: bash e2e/durable-tui/run.sh ${ARGS[*]:-(full suite)}"
 # PODMAN_E2E_KEEP=1 keeps the stopped container for post-mortem (evidence
 # lives inside the container FS; `podman cp` chokes on its /tmp symlinks, so
 # dig evidence out with `podman export <name> -o x.tar`).
@@ -120,7 +120,7 @@ podman run "${RMFLAG[@]}" \
 	"${VOL[@]+"${VOL[@]}"}" \
 	"${ENVARGS[@]+"${ENVARGS[@]}"}" \
 	"$IMAGE" \
-	bash e2e/durable-p1/run.sh ${ARGS[@]+"${ARGS[@]}"} 2>&1 | tee "$LOG"
+	bash e2e/durable-tui/run.sh ${ARGS[@]+"${ARGS[@]}"} 2>&1 | tee "$LOG"
 rc="${PIPESTATUS[0]}"
 
 echo

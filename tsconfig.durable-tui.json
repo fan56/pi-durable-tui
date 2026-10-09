@@ -7,5 +7,5 @@
 		"sourceMap": false,
 		"inlineSources": false
 	},
-	"include": ["packages/coding-agent/src/experimental/durable-p1/**/*.ts"]
+	"include": ["packages/coding-agent/src/experimental/durable-tui/**/*.ts"]
 }
