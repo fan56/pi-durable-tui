@@ -79,6 +79,8 @@ export interface DurableP1Session {
 	/** From createAgentSessionFromServices; the runtime factory must return it. */
 	extensionsResult: unknown;
 	modelFallbackMessage: string | undefined;
+	/** Durable directory id (`selectP1Session*` location id) — resume with --session. */
+	locationId: string;
 	/** A factory that throws: /new, /resume, /fork, and import stay out of v0.1 scope. */
 	throwingRuntimeFactory: () => Promise<never>;
 	close(): Promise<void>;
@@ -684,6 +686,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 			services,
 			extensionsResult: created.extensionsResult,
 			modelFallbackMessage: initial.fallbackMessage,
+			locationId: location.id,
 			throwingRuntimeFactory,
 			close: closeDurable,
 		};

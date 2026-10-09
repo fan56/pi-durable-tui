@@ -11,6 +11,7 @@
 //   -h, --help              usage
 
 import { realpathSync } from "node:fs";
+import chalk from "chalk";
 import { setCapabilityOverrides } from "@earendil-works/pi-tui";
 import {
 	AgentSessionRuntime,
@@ -184,6 +185,15 @@ for (const diagnostic of p1.services.diagnostics) {
 // sessions through it (v0.4). The stock stable-session paths (/resume over
 // JSONL, cross-store /fork and import) refuse with a clear error instead of
 // silently creating an unrelated durable session.
+// currentLocationId tracks the LIVE session across switches so the exit hint
+// resumes what the user was last in, not the boot-time session.
+let currentLocationId = p1.locationId;
+// InteractiveMode's quit path ends in process.exit(0), so a finally block
+// would never run. Node runs synchronous "exit" listeners on process.exit —
+// that's our only reliable hook for the resume hint.
+process.on("exit", () => {
+	printResumeHint(currentLocationId);
+});
 const runtimeFactory: CreateAgentSessionRuntimeFactory = async (options) => {
 	const reason = options.sessionStartEvent?.reason;
 	if (reason === "resume") {
@@ -194,13 +204,17 @@ const runtimeFactory: CreateAgentSessionRuntimeFactory = async (options) => {
 				"durable-p1: switching to non-durable sessions is not supported here — use /sessions to pick a durable session",
 			);
 		}
-		return toRuntimeResult(await createDurableP1Session({ ...sessionFlags, continueSession: false, sessionId: id }));
+		const next = await createDurableP1Session({ ...sessionFlags, continueSession: false, sessionId: id });
+		currentLocationId = next.locationId;
+		return toRuntimeResult(next);
 	}
 	if (reason === "fork") {
 		throw new Error("durable-p1: cross-store fork is not supported yet (planned)");
 	}
 	// "new": a fresh durable session directory.
-	return toRuntimeResult(await createDurableP1Session({ ...sessionFlags, continueSession: false }));
+	const next = await createDurableP1Session({ ...sessionFlags, continueSession: false });
+	currentLocationId = next.locationId;
+	return toRuntimeResult(next);
 };
 const runtime = new AgentSessionRuntime(p1.session, p1.services, runtimeFactory);
 try {
@@ -209,4 +223,21 @@ try {
 } finally {
 	await p1.close();
 	stopThemeWatcher();
+}
+
+/** Mirror stable's exit line: the exact command that reattaches this session. */
+function printResumeHint(locationId: string): void {
+	if (!process.stdout.isTTY) return;
+	// execArgv carries the preload flags (--import source-resolver.ts, tsx,
+	// etc.) that argv strips — without them the reconstructed command would
+	// resolve workspace imports against package dist and fail to boot.
+	const command = [process.execPath, ...process.execArgv, ...process.argv.slice(1), "--session", locationId]
+		.map(quoteArg)
+		.join(" ");
+	process.stdout.write(`${chalk.dim("To resume this session:")} ${command}\n`);
+}
+
+function quoteArg(value: string): string {
+	if (!/[^a-zA-Z0-9_\-./~:@=]/.test(value)) return value;
+	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
