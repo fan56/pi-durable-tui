@@ -1,4 +1,4 @@
-// durable-p1: the "/ext" command — pick which global settings packages load
+// durable-p1: the "/extensions" command — pick which global settings packages load
 // at startup. First boot loads none of them (clean base + builtin MCP); /ext
 // toggles entries in a picker, persists the choice, appends newly selected
 // paths to the live resource loader, and reloads — so additions apply without
@@ -21,7 +21,7 @@ interface DurableP1Seam {
 }
 
 export default function extensionsManagerExtension(pi: ExtensionAPI): void {
-	pi.registerCommand("ext", {
+	pi.registerCommand("extensions", {
 		description: "配置启动加载哪些全局扩展（持久化；勾选后重载生效）",
 		handler: async (_args: string, ctx: ExtensionCommandContext): Promise<void> => {
 			if (ctx.mode !== "tui") return;
@@ -73,7 +73,7 @@ export default function extensionsManagerExtension(pi: ExtensionAPI): void {
 			try {
 				await ctx.reload();
 			} catch (error) {
-				console.error("[durable-p1] reload after /ext failed:", error);
+				console.error("[durable-p1] reload after /extensions failed:", error);
 			}
 		},
 	});

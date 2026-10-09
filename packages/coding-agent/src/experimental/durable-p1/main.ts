@@ -116,7 +116,7 @@ const cwd = realpathSync(process.cwd());
 
 // --- startup extension selection ---------------------------------------------
 // First boot: no selection file → none of the global packages load (clean
-// base + builtin MCP). Once /ext has saved a selection, clean-mode boots
+// base + builtin MCP). Once /extensions has saved a selection, clean-mode boots
 // resolve its names against the global settings packages and append each as
 // an extra extension. Full mode (--with-extensions, i.e. no -ne) loads
 // everything and ignores the selection entirely.
@@ -167,7 +167,7 @@ const p1 = await createDurableP1Session({
 	continueSession: args.continueSession,
 	...(args.sessionId === undefined ? {} : { sessionId: args.sessionId }),
 });
-// The /ext command (jiti module) reaches back for append-only extension
+// The /extensions command (jiti module) reaches back for append-only extension
 // loading through this seam — objects cannot travel via process.env.
 (globalThis as { __durableP1?: unknown }).__durableP1 = {
 	session: p1.session,

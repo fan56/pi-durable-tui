@@ -625,7 +625,7 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 			waitForIdle: async (): Promise<void> => {
 				while (running || compacting) await sleep(100);
 			},
-			// /ext append-only loading: /reload re-resolves this exact array
+			// /extensions append-only loading: /reload re-resolves this exact array
 			// (the loader has no public mutator and no remove channel), so
 			// pushing here is the only way a running boot can gain packages.
 			addExtensionPaths: (paths: string[]): void => {

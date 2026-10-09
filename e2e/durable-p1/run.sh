@@ -283,7 +283,7 @@ s_extpick() {
 	tui_expect ext 60 "deepseek-flash" || return 1
 	# first boot with no saved selection: the package must NOT be loaded
 	pane ext | grep -q "pi-powerline-footer" && return 1
-	tui_keys ext "/ext"; sleep 1; tui_keys ext Escape; sleep 1; tui_keys ext Enter
+	tui_keys ext "/extensions"; sleep 1; tui_keys ext Escape; sleep 1; tui_keys ext Enter
 	tui_expect ext 20 "启动加载的扩展" || return 1
 	local meta idx total i
 	meta="$(ext_pkg_rows)" || return 1
