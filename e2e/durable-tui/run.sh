@@ -87,7 +87,7 @@ tui_dead() { grep -q "^EXITED$" "$LAB/$1.err" 2>/dev/null; }
 
 tui_kill() { t kill-session -t "$1" 2>/dev/null || true; }
 
-TUI_NAMES="boot tool mcp mcpcmd compact steer mswitch killu cont list sess sflag footer abort queue think nm snew lockA lockB bbash terr ccnt ext extb lloss"
+TUI_NAMES="boot tool mcp mcpcmd compact steer mswitch killu cont list sess sflag footer abort queue think nm snew lockA lockB bbash terr ccnt ext extb lloss actp"
 
 kill_all_tuis() {
 	local name
@@ -275,6 +275,36 @@ rows = [os.path.basename(p) for p in pkgs if isinstance(p, str) and os.path.isdi
 if "pi-powerline-footer" in rows:
     print(rows.index("pi-powerline-footer"), len(rows))
 PY
+}
+
+s_actpanel() {
+	# the activity panel shows live thinking/tool state above the editor and
+	# fully hides once the turn settles
+	tui_start actp "${BOOT_ARGS[@]}"
+	tui_expect actp 60 "deepseek" || return 1
+	tui_keys actp BTab; sleep 1
+	tui_keys actp "Think first then act: use bash to run: sleep 8; echo actpanel-ok. Then reply done."; sleep 1; tui_keys actp Enter
+	# thinking and tool phases each surface a themed panel row
+	local w=0 saw=""
+	while [ $w -lt 60 ]; do
+		pane actp >"$LAB/actp-poll-$w.pane" 2>/dev/null
+		if grep -qE "🧠 Thinking: " "$LAB/actp-poll-$w.pane"; then saw="think"; fi
+		if grep -qE "🔧 bash" "$LAB/actp-poll-$w.pane"; then saw="${saw}${saw:++}tool"; fi
+		[ -n "$saw" ] && grep -q "actpanel-ok\|Took" "$LAB/actp-poll-$w.pane" && break
+		sleep 1; w=$((w+1))
+	done
+	[ -n "$saw" ] || return 1
+	# settled turn hides the panel again
+	tui_expect actp 90 "Took" || return 1
+	local w2=0
+	while [ $w2 -lt 15 ]; do
+		pane actp | grep -qE "🧠 Thinking: |🔧 bash" || break
+		sleep 1; w2=$((w2+1))
+	done
+	# `grep -q … && return 1` alone would leave a no-match (correct) outcome
+	# as the function's own exit status — close with an explicit success.
+	if pane actp | grep -qE "🧠 Thinking: |🔧 bash"; then return 1; fi
+	return 0
 }
 
 s_lockloss() {
@@ -519,6 +549,7 @@ else
 	skip_scenario footer "fixture ~/repo/pi-powerline-footer not present"
 fi
 want lockloss && scenario lockloss s_lockloss lloss
+want actpanel && scenario actpanel s_actpanel actp
 if [ -n "$(ext_pkg_rows)" ]; then
 	want extpick && scenario extpick s_extpick ext
 	want extboot && scenario extboot s_extboot extb

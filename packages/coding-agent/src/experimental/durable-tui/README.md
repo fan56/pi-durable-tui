@@ -49,6 +49,7 @@ session (`session.sqlite` + `session.json` sidecar), `proper-lockfile` locked.
 | `session-meta.ts` | `session.json` sidecars: identity, `/name` persistence, `--list` |
 | `sessions-extension.ts` | v0.4: the `/sessions` picker — lists sidecars, excludes the current session, pre-validates the target's lock, switches through a carrier path the runtime factory resolves |
 | `extensions-manager.ts` | v0.5: the `/extensions` picker — toggle-and-save the startup extension set; appends new picks to the live loader and reloads |
+| `activity-panel.ts` | v0.7: the activity panel — one viewport above the editor alternating live model thinking (🧠) and live tool output (🔧 + elapsed), auto-hiding on settle; ships always-on with the entry |
 | `extension-picker.ts` | v0.5: selection persistence + global-package discovery shared by boot and `/extensions` |
 
 Tests: `packages/coding-agent/test/durable-tui-*.test.ts` (vitest).

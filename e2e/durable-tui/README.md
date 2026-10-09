@@ -63,6 +63,7 @@ podman tag  docker.m.daocloud.io/library/node:24-bookworm-slim docker.io/library
 | footer | powerline footer（☁️ 段 + 📁 边框）与 MCP 同载互不干扰 |
 | extpick | 首启零扩展加载 → `/extensions` 勾选 pi-powerline-footer → 保存后**重载即生效**（无需重启） |
 | extboot | `/extensions` 已保存的扩展组在裸启动时静默应用 |
+| actpanel | 活动面板：思考期出 🧠 带、工具期出 🔧 带（含实时秒表），回合收尾后自动隐藏 |
 
 `extpick`/`extboot` 依赖全局 settings.json 里存在 pi-powerline-footer 包（容器默认不挂载全局 settings，自动 SKIP）。
 
