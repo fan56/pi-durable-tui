@@ -3,15 +3,15 @@
 // live tool output while a tool runs. The two never run at the same time, so
 // a single widget alternates between them instead of two panels stacking.
 //
-//   row 0    "🧠 Thinking: " / "🔧 bash · sleep 8 && echo ok"  (+ elapsed)
-//   row 1..N latest wrapped lines of thinking text / tool output
+// Both modes SCROLL: the viewport always renders the NEWEST wrapped lines
+// (think-panel semantics — the prefix rides on the first visible line), so
+// long streams keep the latest content on screen. Tool mode pins its status
+// header (name + args + ticking elapsed) on row 0 and scrolls output beneath.
 //
-// Colors come from the ACTIVE THEME's semantic keys, so the panel adapts to
-// any theme while staying distinct from normal chat: accent-colored icon
-// prefix (🧠/🔧), theme "text" body, success/error fg on the settle flash.
-// theme.bg() calls are kept for the day widget rows carry backgrounds —
-// today the widget pipeline drops bg codes (verified: think-panel's band is
-// equally bg-less), so distinction rides on the fg colors.
+// Colors ride the active theme's semantic keys (accent icon prefix, "text"
+// body, success/error on the settle flash). theme.bg() calls are kept for the
+// day widget rows carry backgrounds — today the widget pipeline drops bg
+// codes (verified: think-panel's band is equally bg-less).
 // Auto-hides: thinking_end hides thinking, tool end flashes ≤2s then hides,
 // agent_settled is the safety-net reset.
 
@@ -67,42 +67,40 @@ function reset(): void {
 	requestRender();
 }
 
-/** thinking and tool output share the viewport: latest wrapped lines, solid bg band. */
+function bandBgKey(): ThemeBg {
+	if (mode === "thinking") return "customMessageBg";
+	if (mode === "settled") return toolError ? "toolErrorBg" : "toolSuccessBg";
+	return "toolPendingBg";
+}
+
+/** Newest-first viewport: thinking scrolls its full height, tool pins a status header. */
 function bandRows(theme: Theme, width: number): string[] {
-	let bgKey: ThemeBg;
-	let header: string;
-	let body: string;
+	if (mode === "idle") return [];
+	const row = (s: string) => theme.bg(bandBgKey(), truncateToWidth(s, width, "…", true));
+	const body = mode === "thinking" ? thinkText : toolOutput;
+	const tail = body.length > MAX_RETAINED_CHARS ? body.slice(-MAX_RETAINED_CHARS) : body;
+	const wrapped = tail.trim() === "" ? [] : wrapTextWithAnsi(tail, Math.max(1, width));
+
 	if (mode === "thinking") {
-		bgKey = "customMessageBg";
-		header = theme.fg("accent", THINK_PREFIX);
-		body = thinkText;
-	} else if (mode === "tool") {
-		bgKey = "toolPendingBg";
-		const elapsed = toolStartMs > 0 ? ` [${Math.max(0, Math.round((Date.now() - toolStartMs) / 1000))}s]` : "";
-		header = theme.fg("accent", TOOL_PREFIX) + theme.fg("text", `${toolLabel}${elapsed}`);
-		body = toolOutput;
-	} else if (mode === "settled") {
-		bgKey = toolError ? "toolErrorBg" : "toolSuccessBg";
-		const secs = toolStartMs > 0 ? `${Math.max(0, Math.round((Date.now() - toolStartMs) / 1000))}s` : "";
-		const mark = toolError ? "✗" : "✓";
-		header = theme.fg("accent", TOOL_PREFIX) + theme.fg(toolError ? "error" : "success", `${mark} ${toolLabel} · ${secs}`);
-		body = toolOutput;
-	} else {
-		return [];
+		const window = wrapped.slice(-ROWS);
+		if (window.length === 0) return [];
+		const rows = [row(theme.fg("accent", THINK_PREFIX) + theme.fg("mdCodeBlock", window[0]!))];
+		for (let i = 1; i < window.length; i++) rows.push(row(theme.fg("mdCodeBlock", window[i]!)));
+		return rows;
 	}
 
-	const rows: string[] = [];
-	const bg = (s: string) => theme.bg(bgKey, s);
-	const row = (s: string) => bg(truncateToWidth(s, width, "…", true));
-	rows.push(row(header + truncateToWidth(body.split("\n")[0] ?? "", width, "…", false)));
-	// remaining body lines fill up to ROWS-1; newest content stays visible
-	if (body.trim() !== "" || mode !== "thinking") {
-		const tail = body.length > MAX_RETAINED_CHARS ? body.slice(-MAX_RETAINED_CHARS) : body;
-		const wrapped = wrapTextWithAnsi(tail, Math.max(1, width));
-		for (const line of wrapped.slice(-(ROWS - 1))) {
-			rows.push(row(theme.fg("mdCodeBlock", line)));
-		}
+	const elapsed = toolStartMs > 0 ? Math.max(0, Math.round((Date.now() - toolStartMs) / 1000)) : 0;
+	let header: string;
+	if (mode === "settled") {
+		const mark = toolError ? "✗" : "✓";
+		header =
+			theme.fg("accent", TOOL_PREFIX) +
+			theme.fg(toolError ? "error" : "success", `${mark} ${toolLabel} · ${elapsed}s`);
+	} else {
+		header = theme.fg("accent", TOOL_PREFIX) + theme.fg("text", `${toolLabel} [${elapsed}s]`);
 	}
+	const rows = [row(header)];
+	for (const line of wrapped.slice(-(ROWS - 1))) rows.push(row(theme.fg("mdCodeBlock", line)));
 	return rows.slice(0, ROWS);
 }
 
