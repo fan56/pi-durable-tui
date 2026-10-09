@@ -21,6 +21,7 @@ import { InteractiveMode } from "../../modes/interactive/interactive-mode.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "../../modes/interactive/theme/theme.ts";
 import { validateThemeJson } from "../../modes/interactive/theme/theme-json.ts";
 import { createDurableP1Session } from "./durable-agent-session.ts";
+import { loadSelection, readGlobalPackages, resolveSelection } from "./extension-picker.ts";
 import { p1SessionsRoot } from "./session-location.ts";
 import { listSessions } from "./session-meta.ts";
 import { durableIdFromCarrierPath } from "./sessions-extension.ts";
@@ -113,6 +114,26 @@ function parseArgs(argv: readonly string[]): P1Args {
 const args = parseArgs(process.argv.slice(2));
 const cwd = realpathSync(process.cwd());
 
+// --- startup extension selection ---------------------------------------------
+// First boot: no selection file → none of the global packages load (clean
+// base + builtin MCP). Once /ext has saved a selection, clean-mode boots
+// resolve its names against the global settings packages and append each as
+// an extra extension. Full mode (--with-extensions, i.e. no -ne) loads
+// everything and ignores the selection entirely.
+let appliedExtensionPaths: string[] = [];
+if (!args.list && args.noExtensions) {
+	const globalPackages = await readGlobalPackages();
+	const saved = await loadSelection();
+	if (saved !== undefined && saved.length > 0) {
+		const resolved = resolveSelection(saved, globalPackages);
+		for (const dropped of saved.filter((n) => !resolved.some((r) => r.name === n))) {
+			console.error(`durable-p1: saved extension "${dropped}" is not in global settings anymore — skipped`);
+		}
+		appliedExtensionPaths = resolved.map((r) => r.path);
+		args.extraExtensions.push(...appliedExtensionPaths);
+	}
+}
+
 if (args.list) {
 	const sessions = await listSessions(p1SessionsRoot(cwd));
 	if (sessions.length === 0) {
@@ -138,6 +159,7 @@ const sessionFlags = {
 	extraExtensions: [
 		...(args.extraExtensions.length > 0 ? args.extraExtensions : []),
 		new URL("./sessions-extension.ts", import.meta.url).pathname,
+		new URL("./extensions-manager.ts", import.meta.url).pathname,
 	],
 };
 const p1 = await createDurableP1Session({
@@ -145,6 +167,12 @@ const p1 = await createDurableP1Session({
 	continueSession: args.continueSession,
 	...(args.sessionId === undefined ? {} : { sessionId: args.sessionId }),
 });
+// The /ext command (jiti module) reaches back for append-only extension
+// loading through this seam — objects cannot travel via process.env.
+(globalThis as { __durableP1?: unknown }).__durableP1 = {
+	session: p1.session,
+	appliedExtensionPaths: new Set(appliedExtensionPaths),
+};
 setThemeJsonValidator(validateThemeJson);
 initTheme(p1.services.settingsManager.getTheme(), true);
 setCapabilityOverrides(p1.services.settingsManager.getTerminalCapabilityOverrides());

@@ -1,4 +1,4 @@
-# durable-p1 (v0.4)
+# durable-p1 (v0.5)
 
 The stable interactive-mode TUI (`packages/coding-agent/src/modes/interactive/`,
 unmodified) running on the durable backend (`@earendil-works/pi-durable`
@@ -16,8 +16,18 @@ node --import <repo>/packages/coding-agent/src/experimental/source-resolver.ts \
 
 Flags: `--continue|-c` (attach newest session for cwd) · `--provider P
 --model M` · `--no-extensions|-ne` · `-e PATH` (extra extension, repeatable) ·
-`--list` (print recorded sessions) · `-h`. The local launcher runs this with a
-clean base plus stable's built-in MCP extension by default.
+`--list` (print recorded sessions) · `-h`. The local launcher (`pi-durable-tui`)
+runs this with a clean base plus stable's built-in MCP extension by default.
+
+**v0.5 startup extension selection**: first boot loads none of the global
+settings packages. `/ext` in the TUI opens a toggle picker over them
+(`ctx.ui.select`, jiti-safe via the globalThis seam), persists the choice to
+`~/.pi/agent/durable-p1-extensions.json` (override path:
+`PI_DURABLE_EXT_CONFIG`), appends newly checked paths to the live resource
+loader (facade `addExtensionPaths`; `/reload` re-resolves that array) and
+reloads — additions apply without a restart, removals on the next boot.
+`--with-extensions` on the launcher bypasses the selection and loads
+everything.
 
 Credentials are shared with stable pi (`~/.pi/agent/auth.json`, stored wins
 over env). Sessions live under
@@ -38,6 +48,8 @@ session (`session.sqlite` + `session.json` sidecar), `proper-lockfile` locked.
 | `session-location.ts` | session directories + locks under the isolated p1 root |
 | `session-meta.ts` | `session.json` sidecars: identity, `/name` persistence, `--list` |
 | `sessions-extension.ts` | v0.4: the `/sessions` picker — lists sidecars, excludes the current session, pre-validates the target's lock, switches through a carrier path the runtime factory resolves |
+| `extensions-manager.ts` | v0.5: the `/ext` picker — toggle-and-save the startup extension set; appends new picks to the live loader and reloads |
+| `extension-picker.ts` | v0.5: selection persistence + global-package discovery shared by boot and `/ext` |
 
 Tests: `packages/coding-agent/test/durable-p1-*.test.ts` (vitest).
 Typecheck: `npx tsc -p tsconfig.p1check.json` from the repo root.

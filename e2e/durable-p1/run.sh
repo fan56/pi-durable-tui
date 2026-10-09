@@ -45,6 +45,7 @@ tui_start() { # tui_start <name> [entry args...]
 	for arg in "$@"; do quoted+=("$(printf '%q' "$arg")"); done
 	local envprefix=""
 	[ -n "${DEEPSEEK_API_KEY:-}" ] && envprefix="env DEEPSEEK_API_KEY=$(printf '%q' "$DEEPSEEK_API_KEY") "
+	[ -n "${PI_DURABLE_EXT_CONFIG:-}" ] && envprefix="${envprefix}env PI_DURABLE_EXT_CONFIG=$(printf '%q' "$PI_DURABLE_EXT_CONFIG") "
 	t kill-session -t "$name" 2>/dev/null || true
 	t new-session -d -s "$name" -x 200 -y 50 \
 		"cd $(printf '%q' "$LAB") && ${envprefix}node --import $(printf '%q' "$RESOLVER") $(printf '%q' "$ENTRY") ${quoted[*]} 2>$(printf '%q' "$LAB/$name.err"); echo EXITED >>$(printf '%q' "$LAB/$name.err"); sleep 300"
@@ -86,7 +87,7 @@ tui_dead() { grep -q "^EXITED$" "$LAB/$1.err" 2>/dev/null; }
 
 tui_kill() { t kill-session -t "$1" 2>/dev/null || true; }
 
-TUI_NAMES="boot tool mcp mcpcmd compact steer mswitch killu cont list sess sflag footer abort queue think nm snew lockA lockB bbash terr ccnt"
+TUI_NAMES="boot tool mcp mcpcmd compact steer mswitch killu cont list sess sflag footer abort queue think nm snew lockA lockB bbash terr ccnt ext extb"
 
 kill_all_tuis() {
 	local name
@@ -132,6 +133,8 @@ trap cleanup EXIT
 
 # --- lab setup ---------------------------------------------------------------
 
+PI_DURABLE_EXT_CONFIG="$LAB/ext-selection.json"
+export PI_DURABLE_EXT_CONFIG
 mkdir -p "$LAB/.pi"
 cat >"$LAB/.pi/settings.json" <<'EOF'
 {
@@ -256,6 +259,55 @@ s_list() {
 	grep -q "No durable-p1 sessions" "$LAB/list.out" && return 1
 	grep -qE "^[0-9]{4}-" "$LAB/list.out" || return 1
 	return 0
+}
+
+# /ext needs the pi-powerline-footer package present in GLOBAL settings; the
+# container has no global settings mounted by default, so both scenarios skip.
+ext_pkg_rows() { # prints "<footer-index> <row-count>" or nothing
+	python3 - "$HOME/.pi/agent/settings.json" <<'PY' 2>/dev/null || true
+import json, os, sys
+try:
+    pkgs = json.load(open(sys.argv[1])).get("packages", [])
+except Exception:
+    sys.exit(0)
+agent = os.path.expanduser("~/.pi/agent")
+rows = [os.path.basename(p) for p in pkgs if isinstance(p, str) and os.path.isdir(os.path.join(agent, p))]
+if "pi-powerline-footer" in rows:
+    print(rows.index("pi-powerline-footer"), len(rows))
+PY
+}
+
+s_extpick() {
+	rm -f "$PI_DURABLE_EXT_CONFIG"
+	tui_start ext "${BOOT_ARGS[@]}"
+	tui_expect ext 60 "deepseek-flash" || return 1
+	# first boot with no saved selection: the package must NOT be loaded
+	pane ext | grep -q "pi-powerline-footer" && return 1
+	tui_keys ext "/ext"; sleep 1; tui_keys ext Escape; sleep 1; tui_keys ext Enter
+	tui_expect ext 20 "启动加载的扩展" || return 1
+	local meta idx total i
+	meta="$(ext_pkg_rows)" || return 1
+	[ -n "$meta" ] || return 1
+	idx="${meta%% *}"; total="${meta##* }"
+	for i in $(seq 1 "$idx"); do tui_keys ext Down; sleep 0.3; done
+	tui_keys ext Enter; sleep 2
+	pane ext | grep -q "\[x\] pi-powerline-footer" || return 1
+	# cursor reset to row 0 after the toggle; 完成 sits at index <total>
+	for i in $(seq "$total"); do tui_keys ext Down; sleep 0.3; done
+	tui_keys ext Enter
+	# reload applies the new pick without a restart; the resources list does
+	# not re-render after reload (force:false), so prove the pick is live by
+	# the footer's own rendering
+	tui_expect ext 90 "Reloading keybindings" || return 1
+	tui_expect ext 30 "☁️ deepseek" || return 1
+	[ -f "$PI_DURABLE_EXT_CONFIG" ] || return 1
+}
+
+s_extboot() {
+	# selection saved by extpick must apply silently on a bare boot
+	tui_start extb "${BOOT_ARGS[@]}"
+	tui_expect extb 60 "deepseek-flash" || return 1
+	pane extb | grep -A1 "\[Extensions\]" | grep -q "pi-powerline-footer" || return 1
 }
 
 s_footer() {
@@ -440,6 +492,13 @@ if [ -f "$HOME/repo/pi-powerline-footer/index.ts" ]; then
 	want footer && scenario footer s_footer footer
 else
 	skip_scenario footer "fixture ~/repo/pi-powerline-footer not present"
+fi
+if [ -n "$(ext_pkg_rows)" ]; then
+	want extpick && scenario extpick s_extpick ext
+	want extboot && scenario extboot s_extboot extb
+else
+	skip_scenario extpick "no pi-powerline-footer package in global settings"
+	skip_scenario extboot "no pi-powerline-footer package in global settings"
 fi
 
 echo

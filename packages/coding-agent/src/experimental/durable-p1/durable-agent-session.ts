@@ -625,6 +625,18 @@ export async function createDurableP1Session(options: DurableP1SessionOptions): 
 			waitForIdle: async (): Promise<void> => {
 				while (running || compacting) await sleep(100);
 			},
+			// /ext append-only loading: /reload re-resolves this exact array
+			// (the loader has no public mutator and no remove channel), so
+			// pushing here is the only way a running boot can gain packages.
+			addExtensionPaths: (paths: string[]): void => {
+				const loader = services.resourceLoader as unknown as { additionalExtensionPaths?: string[] };
+				if (!Array.isArray(loader.additionalExtensionPaths)) {
+					throw new Error(
+						"durable-p1: resource loader no longer exposes additionalExtensionPaths (upstream change?)",
+					);
+				}
+				loader.additionalExtensionPaths.push(...paths);
+			},
 			dispose: (): void => {
 				session.dispose();
 				void closeDurable();

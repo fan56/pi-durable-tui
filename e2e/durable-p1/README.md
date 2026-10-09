@@ -61,6 +61,10 @@ podman tag  docker.m.daocloud.io/library/node:24-bookworm-slim docker.io/library
 | toolerr | 工具失败（exit 7）错误回传渲染 |
 | compactcont | `/compact` 后硬杀再 `-c`：压缩条目在转录重建中存活 |
 | footer | powerline footer（☁️ 段 + 📁 边框）与 MCP 同载互不干扰 |
+| extpick | 首启零扩展加载 → `/ext` 勾选 pi-powerline-footer → 保存后**重载即生效**（无需重启） |
+| extboot | `/ext` 已保存的扩展组在裸启动时静默应用 |
+
+`extpick`/`extboot` 依赖全局 settings.json 里存在 pi-powerline-footer 包（容器默认不挂载全局 settings，自动 SKIP）。
 
 ## 现场与清理
 
