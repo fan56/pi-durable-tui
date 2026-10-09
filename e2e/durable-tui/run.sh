@@ -284,7 +284,8 @@ s_lockloss() {
 	tui_expect lloss 60 "deepseek-flash" || return 1
 	local root real lockdir
 	real="$(cd "$LAB" && pwd -P)"
-	root="$(python3 -c "import hashlib,sys;print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:24])" "$real")"
+	# node (not python3): the e2e container image ships node only
+	root="$(node -e 'process.stdout.write(require("crypto").createHash("sha256").update(process.argv[1]).digest("hex").slice(0,24))' "$real")"
 	# newest session = this TUI's; earlier scenarios can leave orphan locks behind
 	lockdir="$(ls -d "$HOME/.pi/agent/experimental/durable-tui-sessions/$root"/*.lock 2>/dev/null | sort | tail -1)"
 	[ -n "$lockdir" ] || return 1
