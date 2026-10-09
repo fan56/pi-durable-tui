@@ -205,4 +205,35 @@ describe("DurableEventAdapter", () => {
 		// Only the user message survives.
 		expect(events.map((event) => event.type)).toEqual(["message_end"]);
 	});
+
+	test("message_update changes reconstruct faithful assistantMessageEvent types", () => {
+		const adapter = new DurableEventAdapter();
+		const events = translateBatches(adapter, [
+			[
+				{ type: "message_start", message: { role: "assistant", content: [], usage: undefined, timestamp: "" } },
+			],
+			[
+				{
+					type: "message_update",
+					usage: { input: 0, output: 0 },
+					changes: [
+						{ type: "thinking_start", contentIndex: 0, block: { type: "thinking", thinking: "" } },
+						{ type: "thinking_delta", contentIndex: 0, delta: "hmm" },
+						{ type: "block", contentIndex: 0, block: { type: "thinking", thinking: "hmm" } },
+						{ type: "text_start", contentIndex: 1, block: { type: "text", text: "" } },
+						{ type: "text_delta", contentIndex: 1, delta: "hi" },
+					],
+				},
+			],
+		]);
+		const updates = events.filter((event) => event.type === "message_update");
+		const ameTypes = updates.map((event) => event["assistantMessageEvent"]).map((e) => (e as AnyEvent)["type"]);
+		// One message_update per change, each with the stock streaming event type —
+		// NOT a uniform "start" (which starved thinking widgets of deltas).
+		expect(ameTypes).toEqual(["thinking_start", "thinking_delta", "thinking_end", "text_start", "text_delta"]);
+		const delta = updates[1]["assistantMessageEvent"] as AnyEvent;
+		expect(delta["delta"]).toBe("hmm");
+		const end = updates[2]["assistantMessageEvent"] as AnyEvent;
+		expect(end["content"]).toBe("hmm");
+	});
 });

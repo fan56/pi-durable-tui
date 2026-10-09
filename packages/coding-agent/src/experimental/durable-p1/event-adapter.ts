@@ -3,7 +3,7 @@
 // AgentSession._handleAgentEvent and the interactive TUI already understand.
 
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent, Message } from "@earendil-works/pi-ai";
 import type { ToolResultMessage } from "@earendil-works/pi-ai/compat";
 import type { AgentEvent as DurableEvent, EntryRecord, JsonObject, MessageChange } from "@earendil-works/pi-durable";
 
@@ -67,12 +67,16 @@ export class DurableEventAdapter {
 			case "message_update":
 				if (this.partial !== undefined) {
 					this.partial.usage = event.usage;
-					for (const change of event.changes) this.applyChange(this.partial, change);
-					out.push({
-						type: "message_update",
-						message: this.partial,
-						assistantMessageEvent: { type: "start", partial: this.partial },
-					});
+					for (const change of event.changes) {
+						this.applyChange(this.partial, change);
+						// Reconstruct the faithful assistantMessageEvent per change so
+						// streaming consumers (think-panel, live-reasoning widgets)
+						// see the same event shapes the stock agent emits.
+						const assistantMessageEvent = changeToAssistantMessageEvent(change, this.partial);
+						if (assistantMessageEvent !== undefined) {
+							out.push({ type: "message_update", message: this.partial, assistantMessageEvent });
+						}
+					}
 				}
 				break;
 			case "message_end": {
@@ -180,6 +184,48 @@ export class DurableEventAdapter {
 				message.stopReason = change.message.stopReason;
 				break;
 		}
+	}
+}
+
+/**
+ * Map a durable MessageChange onto the pi-ai AssistantMessageEvent variant
+ * the stock agent would have emitted for the same stream step. Returns
+ * undefined for changes with no streaming-event counterpart ("block" replaces
+ * a block wholesale; "message" is a whole-message sync).
+ */
+function changeToAssistantMessageEvent(
+	change: MessageChange,
+	partial: AssistantMessage,
+): AssistantMessageEvent | undefined {
+	switch (change.type) {
+		case "thinking_start":
+			return { type: "thinking_start", contentIndex: change.contentIndex, partial };
+		case "thinking_delta":
+			return { type: "thinking_delta", contentIndex: change.contentIndex, delta: change.delta, partial };
+		case "text_start":
+			return { type: "text_start", contentIndex: change.contentIndex, partial };
+		case "text_delta":
+			return { type: "text_delta", contentIndex: change.contentIndex, delta: change.delta, partial };
+		case "toolcall_start":
+			return { type: "toolcall_start", contentIndex: change.contentIndex, partial };
+		case "toolcall_delta":
+			return { type: "toolcall_delta", contentIndex: change.contentIndex, delta: change.delta, partial };
+		case "block": {
+			// A completed block replacing its slot = the matching *_end event.
+			const block = change.block;
+			if (block.type === "thinking") {
+				return { type: "thinking_end", contentIndex: change.contentIndex, content: block.thinking, partial };
+			}
+			if (block.type === "text") {
+				return { type: "text_end", contentIndex: change.contentIndex, content: block.text, partial };
+			}
+			if (block.type === "toolCall") {
+				return { type: "toolcall_end", contentIndex: change.contentIndex, toolCall: block, partial };
+			}
+			return undefined;
+		}
+		case "message":
+			return undefined;
 	}
 }
 
