@@ -6,11 +6,12 @@ This is a fork layer on top of [`earendil-works/pi`](https://github.com/earendil
 Upstream releases are tracked in that repository's changelog, which ships inside
 each release archive as `UPSTREAM-CHANGELOG.md`.
 
-## [0.6.0] — 2026-10-09
+## [0.7.0] — 2026-10-09
 
-> First packaged early-access build. Version follows the fork's own line
-> (`packages/coding-agent/src/experimental/durable-tui/README.md` calls the
-> feature set "v0.6"), not upstream pi's 1.x.
+> First packaged early-access build. The version is the fork's own line, not
+> upstream pi's 1.x, and starts at 0.7.0 because upstream already uses the
+> 0.6.x tags for unrelated 2025 releases — reusing v0.6.0 would make
+> `git tag` ambiguous between the two histories.
 
 ### Added
 
