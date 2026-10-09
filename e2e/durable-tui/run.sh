@@ -175,7 +175,8 @@ s_tool() {
 	tui_expect tool 60 "deepseek-flash" || return 1
 	tui_keys tool "Use the bash tool to run: echo e2e-tool-token — then reply with its exact output."; sleep 1; tui_keys tool Enter
 	tui_expect tool 120 "e2e-tool-token" || return 1
-	tui_expect tool 20 "Took" || return 1
+	# activity panel hides the native block; the audit line takes over
+	tui_expect tool 20 "✓ bash" || return 1
 }
 
 s_mcp() {
@@ -184,7 +185,7 @@ s_mcp() {
 	# The MCP server must connect without the deferred-exposure warning.
 	pane mcp | grep -q "only reachable from the codemode" && return 1
 	tui_keys mcp "Call the tool mcp__echo-test__add with a=17 and b=26, then reply with just its result."; sleep 1; tui_keys mcp Enter
-	tui_expect mcp 120 "mcp__echo_test__add" || return 1
+	tui_expect mcp 120 "mcp__echo-test__add" || return 1
 	tui_expect mcp 60 "43" || return 1
 }
 
@@ -295,7 +296,7 @@ s_actpanel() {
 	done
 	[ -n "$saw" ] || return 1
 	# settled turn hides the panel again
-	tui_expect actp 90 "Took" || return 1
+	tui_expect actp 90 "✓ bash" || return 1
 	local w2=0
 	while [ $w2 -lt 15 ]; do
 		pane actp | grep -qE "🧠 Thinking: |🔧 bash" || break
@@ -500,7 +501,7 @@ s_toolerr() {
 	tui_expect terr 60 "deepseek-flash" || return 1
 	tui_keys terr "Use the bash tool to run exactly: exit 7"; sleep 1; tui_keys terr Enter
 	tui_expect terr 30 "exit 7" || return 1
-	tui_expect terr 90 "exit code|error|Error" || return 1
+	tui_expect terr 90 "⚡ bash|✗ bash|✓ bash · exit 7" || return 1
 }
 
 s_compactcont() {

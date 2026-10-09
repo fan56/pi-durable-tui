@@ -8,15 +8,21 @@
 // long streams keep the latest content on screen. Tool mode pins its status
 // header (name + args + ticking elapsed) on row 0 and scrolls output beneath.
 //
-// Colors ride the active theme's semantic keys (accent icon prefix, "text"
-// body, success/error on the settle flash). theme.bg() calls are kept for the
-// day widget rows carry backgrounds — today the widget pipeline drops bg
-// codes (verified: think-panel's band is equally bg-less).
+// Colors are the SAME tokens the native transcript uses — thinkingText for
+// thinking, toolTitle/toolOutput for tools, success/error for outcomes — so
+// the panel reads as part of the theme, not a parallel style of our own.
+// theme.bg() calls are kept for the day widget rows carry backgrounds — today
+// the widget pipeline drops bg codes (verified: think-panel's band is too).
+//
+// While the panel owns live tool display, the transcript stops duplicating
+// it: registerToolRenderer rerenders every tool with an empty shell while it
+// streams (isPartial) and a one-line ✓/✗ audit when it completes, so history
+// keeps a trail but the chat never shows the block twice.
 // Auto-hides: thinking_end hides thinking, tool end flashes ≤2s then hides,
 // agent_settled is the safety-net reset.
 
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
-import { truncateToWidth, wrapTextWithAnsi, type TUI } from "@earendil-works/pi-tui";
+import { Container, Text, truncateToWidth, wrapTextWithAnsi, type TUI } from "@earendil-works/pi-tui";
 import type { Theme, ThemeBg } from "../../modes/interactive/theme/theme.ts";
 
 const WIDGET_KEY = "durable-tui:activity";
@@ -84,8 +90,9 @@ function bandRows(theme: Theme, width: number): string[] {
 	if (mode === "thinking") {
 		const window = wrapped.slice(-ROWS);
 		if (window.length === 0) return [];
-		const rows = [row(theme.fg("accent", THINK_PREFIX) + theme.fg("mdCodeBlock", window[0]!))];
-		for (let i = 1; i < window.length; i++) rows.push(row(theme.fg("mdCodeBlock", window[i]!)));
+		const think = (s: string) => theme.fg("thinkingText", s);
+		const rows = [row(theme.italic(think(THINK_PREFIX + window[0]!)))];
+		for (let i = 1; i < window.length; i++) rows.push(row(theme.italic(think(window[i]!))));
 		return rows;
 	}
 
@@ -93,14 +100,12 @@ function bandRows(theme: Theme, width: number): string[] {
 	let header: string;
 	if (mode === "settled") {
 		const mark = toolError ? "✗" : "✓";
-		header =
-			theme.fg("accent", TOOL_PREFIX) +
-			theme.fg(toolError ? "error" : "success", `${mark} ${toolLabel} · ${elapsed}s`);
+		header = theme.fg("toolTitle", theme.bold(`${mark} ${toolLabel} · ${elapsed}s`));
 	} else {
-		header = theme.fg("accent", TOOL_PREFIX) + theme.fg("text", `${toolLabel} [${elapsed}s]`);
+		header = theme.fg("toolTitle", theme.bold(`${TOOL_PREFIX}${toolLabel}`)) + theme.fg("muted", ` [${elapsed}s]`);
 	}
 	const rows = [row(header)];
-	for (const line of wrapped.slice(-(ROWS - 1))) rows.push(row(theme.fg("mdCodeBlock", line)));
+	for (const line of wrapped.slice(-(ROWS - 1))) rows.push(row(theme.fg("toolOutput", line)));
 	return rows.slice(0, ROWS);
 }
 
@@ -134,6 +139,28 @@ function resultText(result: unknown): string {
 }
 
 export default function activityPanelExtension(pi: ExtensionAPI): void {
+	// The panel owns LIVE tool display; the transcript keeps only a compact
+	// completed-result audit line instead of the full duplicated block.
+	pi.registerToolRenderer((toolName, next) => ({
+		renderShell: "self" as const,
+		renderCall: () => new Container(),
+		renderResult: (result, options, theme, context) => {
+			if (options.isPartial) return new Container();
+			// State comes from the content, not just isError: the durable
+			// harness reports aborts/failures as "[error] Tool X was aborted"
+			// text with isError left undefined.
+			const text = resultText(result);
+			const interrupted = /interrupt/i.test(text);
+			const aborted = /was aborted/i.test(text);
+			const errored = result.isError === true || /\[error\]/.test(text);
+			const mark = interrupted || aborted ? "⚡" : errored ? "✗" : "✓";
+			const fgKey = interrupted || aborted ? "warning" : errored ? "error" : "success";
+			const suffix = interrupted ? " · interrupted" : aborted ? " · was aborted" : "";
+			const summary = summarizeArgs(context.args);
+			return new Text(theme.fg(fgKey, `${mark} ${toolName}${summary}${suffix}`), 0, 0);
+		},
+	}));
+
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx?.mode !== "tui") return;
 		reset();
