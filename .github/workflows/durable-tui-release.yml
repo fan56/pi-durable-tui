@@ -77,7 +77,6 @@ jobs:
           npm run build
           npx tsc -p packages/coding-agent/tsconfig.build.durable.json
           node scripts/build-coding-agent-bundle.mjs
-          npx tsc -p tsconfig.durable-tui.json
           npx vitest --run packages/coding-agent/test/durable-tui-*.test.ts
 
       - name: Build the release archives
