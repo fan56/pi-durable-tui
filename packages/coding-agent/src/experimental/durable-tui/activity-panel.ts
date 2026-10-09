@@ -18,8 +18,9 @@
 // it: registerToolRenderer rerenders every tool with an empty shell while it
 // streams (isPartial) and a one-line ✓/✗ audit when it completes, so history
 // keeps a trail but the chat never shows the block twice.
-// Auto-hides: thinking_end hides thinking, tool end flashes ≤2s then hides,
-// agent_settled is the safety-net reset.
+// Auto-hides: each phase dwells DWELL_MS after it truly ends (thinking_end,
+// tool end) and then hides; a following phase cancels the dwell.
+// agent_settled remains the safety-net reset.
 
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
 import { Container, Text, truncateToWidth, wrapTextWithAnsi, type TUI } from "@earendil-works/pi-tui";
@@ -28,9 +29,12 @@ import type { Theme, ThemeBg } from "../../modes/interactive/theme/theme.ts";
 const WIDGET_KEY = "durable-tui:activity";
 const THINK_PREFIX = "🧠 Thinking: ";
 const TOOL_PREFIX = "🔧 ";
-const ROWS = 3;
+// default viewport height for BOTH modes (user spec: 7 rows)
+const ROWS = 7;
 const MAX_RETAINED_CHARS = 4000;
-const SETTLE_FLASH_MS = 2000;
+// per-phase dwell: keep the last lines visible 1s after the phase ends
+// (thinking_end and tool end alike), then hide. New phases cancel the dwell.
+const DWELL_MS = 1000;
 
 type Mode = "idle" | "thinking" | "tool" | "settled";
 
@@ -60,6 +64,15 @@ function stopTicker(): void {
 		clearInterval(elapsedTicker);
 		elapsedTicker = undefined;
 	}
+}
+
+function scheduleDwellHide(): void {
+	clearSettleTimer();
+	settleTimer = setTimeout(() => {
+		settleTimer = undefined;
+		reset();
+	}, DWELL_MS);
+	settleTimer.unref?.();
 }
 
 function reset(): void {
@@ -185,9 +198,9 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 		const type = (event.assistantMessageEvent as { type?: unknown })?.type;
 		if (typeof type !== "string" || !type.startsWith("thinking_")) return;
 		if (type === "thinking_end") {
-			// thinking pauses here; a tool_start or later thinking_start re-shows
-			thinkText = "";
-			if (mode === "thinking") reset();
+			// phase over: dwell on the last lines briefly, then hide; a
+			// tool_start or later thinking_start cancels the dwell
+			if (mode === "thinking") scheduleDwellHide();
 			return;
 		}
 		const content = (event.message as { content?: unknown } | null)?.content;
@@ -221,7 +234,13 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 
 	pi.on("tool_execution_update", (event, ctx) => {
 		if (ctx?.mode !== "tui" || mode !== "tool") return;
-		toolOutput = resultText(event.partialResult).slice(-MAX_RETAINED_CHARS);
+		// partials are INCREMENTAL chunks, not cumulative snapshots (verified
+		// live: a 40-line streamer delivered one line per update)
+		const chunk = resultText(event.partialResult);
+		if (chunk !== "") {
+			toolOutput = toolOutput === "" ? chunk : `${toolOutput}\n${chunk}`;
+			if (toolOutput.length > MAX_RETAINED_CHARS) toolOutput = toolOutput.slice(-MAX_RETAINED_CHARS);
+		}
 		requestRender();
 	});
 
@@ -235,12 +254,7 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 		toolStartMs = endMs - duration; // freeze the shown elapsed at actual duration
 		mode = "settled";
 		requestRender();
-		clearSettleTimer();
-		settleTimer = setTimeout(() => {
-			settleTimer = undefined;
-			if (mode === "settled") reset();
-		}, SETTLE_FLASH_MS);
-		settleTimer.unref?.();
+		scheduleDwellHide();
 	});
 
 	pi.on("agent_settled", (_event, ctx) => {
