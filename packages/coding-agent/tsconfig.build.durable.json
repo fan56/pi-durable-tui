@@ -1,0 +1,14 @@
+{
+	"//": "Fork layer. Extends the upstream build config and only narrows the exclude:",
+	"//2": "the experimental durable-tui tree compiles into dist/experimental, so",
+	"//3": "scripts/build-binaries.sh can produce a pi-durable-tui executable.",
+	"//4": "Nothing upstream is modified — the shared config lives in tsconfig.build.json.",
+	"extends": "./tsconfig.build.json",
+	"compilerOptions": {
+		"declaration": false,
+		"declarationMap": false,
+		"sourceMap": false,
+		"inlineSources": false
+	},
+	"exclude": ["node_modules", "dist", "src/client", "src/cli/experimental"]
+}

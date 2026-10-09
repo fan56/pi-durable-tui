@@ -45,3 +45,7 @@ plans/
 .pi/hf-sessions-backup/
 collect.sh
 packages/agent/docs/extensions/pi-server-artifact/index.md
+
+# --- Fork layer: pi-durable-tui early-access releases (see README-FORK.md) ---
+release/
+packages/coding-agent/binaries-durable-tui/

@@ -10,7 +10,7 @@
 //   --list                  print the sessions recorded for this cwd and exit
 //   -h, --help              usage
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import chalk from "chalk";
 import { setCapabilityOverrides } from "@earendil-works/pi-tui";
 import {
@@ -26,6 +26,26 @@ import { loadSelection, readGlobalPackages, resolveSelection } from "./extension
 import { migrateLegacySessionsRoot, tuiSessionsRoot } from "./session-location.ts";
 import { listSessions } from "./session-meta.ts";
 import { durableIdFromCarrierPath } from "./sessions-extension.ts";
+
+/**
+ * Fork layer: resolve a bundling-agnostic path to one of the entry's sibling
+ * extension modules.
+ *
+ * The local launcher runs main.ts from source, where the sibling is
+ * `./name.ts`. The released bundle is a single `durable-tui-runtime.js` whose
+ * enqueued extensions are emitted as `./name.js` next to it. Checking the
+ * `.ts` sibling first keeps source runs (and any future .ts-preserving build)
+ * working, and the `.js` sibling is what the release archive relies on.
+ */
+function resolveSiblingExtension(relativeBase: string): string {
+	for (const candidate of [
+		new URL(`${relativeBase}.ts`, import.meta.url),
+		new URL(`${relativeBase}.js`, import.meta.url),
+	]) {
+		if (existsSync(candidate)) return candidate.pathname;
+	}
+	throw new Error(`durable-tui: cannot locate the bundled extension ${relativeBase}.{ts,js}`);
+}
 
 type TuiSession = Awaited<ReturnType<typeof createDurableTuiSession>>;
 function toRuntimeResult(tui: TuiSession): CreateAgentSessionRuntimeResult {
@@ -160,10 +180,16 @@ const sessionFlags = {
 	...(args.noExtensions ? { noExtensions: true } : {}),
 	// The /sessions picker ships with the entry itself; explicit CLI paths
 	// (and even --no-extensions) keep it loaded.
+	//
+	// Fork layer: resolve next to THIS module. Under `node --import source-resolver`
+	// (the local launcher) the module is main.ts next to these .ts files; in the
+	// released bundle it is durable-tui-runtime.js and the extensions are emitted
+	// as sibling .js. Try the sibling of the running file first, then both
+	// extensions, so one build artifact serves both layouts.
 	extraExtensions: [
 		...(args.extraExtensions.length > 0 ? args.extraExtensions : []),
-		new URL("./sessions-extension.ts", import.meta.url).pathname,
-		new URL("./extensions-manager.ts", import.meta.url).pathname,
+		resolveSiblingExtension("./sessions-extension"),
+		resolveSiblingExtension("./extensions-manager"),
 	],
 };
 const tui = await createDurableTuiSession({

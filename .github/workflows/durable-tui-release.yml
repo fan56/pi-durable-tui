@@ -1,0 +1,156 @@
+# Release: build the pi-durable-tui archives and attach them to a GitHub
+# Release when a v* tag is pushed.
+#
+# Nothing is published to npm — this fork ships GitHub Release assets only.
+#
+# Lessons carried over from the dsh release incidents (same policy as the
+# @aiwayds/pi-* extension repos):
+#   - gates run before any artifact is produced
+#   - the version comes from VERSION (the fork's own line), and the tag must
+#     agree with it; a mismatch fails the build instead of shipping a
+#     mislabelled archive
+#   - the release job never rebuilds: it downloads the artifacts the build job
+#     produced, so the thing that was smoked-tested is the thing that ships
+#   - re-running is safe: an existing release is backfilled, not overwritten
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.6.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build archives
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
+          sudo ln -s "$(which fdfind)" /usr/local/bin/fd
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Resolve and check the version
+        id: version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          file_version="$(tr -d '[:space:]' < VERSION)"
+          tag_version="${TAG#v}"
+          echo "version=${file_version}" >> "$GITHUB_OUTPUT"
+          if [ "$file_version" != "$tag_version" ]; then
+            echo "::error::tag $TAG does not match VERSION ($file_version). Bump VERSION, or tag v${file_version}."
+            exit 1
+          fi
+          echo "releasing pi-durable-tui ${file_version}"
+
+      - name: Gate
+        run: |
+          npm run build
+          npx tsc -p packages/coding-agent/tsconfig.build.durable.json
+          node scripts/build-coding-agent-bundle.mjs
+          npx tsc -p tsconfig.durable-tui.json
+          npx vitest --run packages/coding-agent/test/durable-tui-*.test.ts
+
+      - name: Build the release archives
+        run: |
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            ./scripts/build-durable-tui-release.sh --skip-build --platform "$platform"
+          done
+
+      - name: Smoke-test the linux archive
+        # The archive is only useful if it runs after a fresh unpack + install.
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          tar -xzf release/pi-durable-tui-*-linux-x64.tar.gz -C "$stage"
+          cd "$stage/pi-durable-tui"
+          npm install --omit=dev --no-audit --no-fund
+          ./pi-durable-tui --help
+          ./pi-durable-tui --list
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd release
+          shasum -a 256 ./*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            release/*.tar.gz
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Create or backfill the release
+        # The build job already ran the gates; there is nothing left to verify,
+        # so re-running after a partial failure simply re-attaches the assets.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists — uploading any missing assets"
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --title "pi-durable-tui $VERSION (experimental)" \
+              --notes "Experimental early-access build of the durable coding agent.
+
+The official durable coding agent is in development; this is a preview that runs the stable pi TUI on the durable runtime. See the README in the archive for what works and what is not wired yet.
+
+Requires Node >= 24 (the durable store uses \`node:sqlite\`, which Bun does not implement — that is why this ships a bundle rather than a single-file binary).
+
+**Install:** unpack the archive for your platform, then \`npm install --omit=dev\` and \`./pi-durable-tui\`.
+
+Assets: darwin-arm64, darwin-x64, linux-x64, linux-arm64. \`SHA256SUMS\` covers all four." \
+              --prerelease
+          fi

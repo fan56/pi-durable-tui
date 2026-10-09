@@ -1,0 +1,92 @@
+# CI for the pi-durable-tui fork layer.
+#
+# Scope: does the fork still build, does the experimental tree still typecheck,
+# and does the release archive still assemble and launch? Upstream's own ci.yml
+# covers the upstream packages; this workflow only adds what the fork changes.
+#
+# The schedule exists to catch upstream drift: this fork's durable-tui reaches
+# into pi internals, so an upstream release can break the build without any
+# commit here.
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**', 'fix/**']
+  pull_request:
+  schedule:
+    # Daily 04:40 UTC — upstream pi drift shows up here before a release does.
+    - cron: '40 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  durable-tui:
+    name: Build & Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
+          sudo ln -s "$(which fdfind)" /usr/local/bin/fd
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build all workspace packages
+        run: npm run build
+
+      - name: Build the fork layer (durable-tui + bundle)
+        run: |
+          npx tsc -p packages/coding-agent/tsconfig.build.durable.json
+          node scripts/build-coding-agent-bundle.mjs
+
+      - name: Typecheck the experimental tree
+        run: npx tsc -p tsconfig.durable-tui.json
+
+      - name: Test (durable-tui + durable)
+        # Scoped to the fork's surface: the two adapter tests plus the durable
+        # package. The full coding-agent suite is upstream's and already runs in
+        # upstream's ci.yml; no need to pay for it twice.
+        run: |
+          npx vitest --run packages/coding-agent/test/durable-tui-*.test.ts
+          npm test --workspace @earendil-works/pi-durable
+
+      - name: Pack the release archive
+        run: ./scripts/build-durable-tui-release.sh --skip-build --platform linux-x64
+
+      - name: Install and launch the archive
+        # The archive must be self-sufficient: unpack, install its own pinned
+        # runtime deps, and start. This is the check that a missing external
+        # dependency (see allowedExternalPackages in
+        # scripts/build-coding-agent-bundle.mjs) fails here rather than for a user.
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          tar -xzf release/pi-durable-tui-*-linux-x64.tar.gz -C "$stage"
+          cd "$stage/pi-durable-tui"
+          npm install --omit=dev --no-audit --no-fund
+          ./pi-durable-tui --help
+          ./pi-durable-tui --list
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-durable-tui-linux-x64
+          path: release/*.tar.gz*
+          if-no-files-found: error
+          retention-days: 7

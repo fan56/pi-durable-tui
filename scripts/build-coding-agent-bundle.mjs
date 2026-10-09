@@ -159,6 +159,13 @@ for (const entry of [
 rmSync(bundleDir, { force: true, recursive: true });
 mkdirSync(bundleDir, { recursive: true });
 
+// Fork layer: the experimental durable-tui compiles to dist/experimental only
+// when the fork build config ran (tsconfig.build.durable.json). Emit its bundle
+// entry alongside the upstream ones so build-binaries can compile a
+// pi-durable-tui executable. Absent on a plain upstream checkout — the entry is
+// simply not added, so this file stays upstream-compatible.
+const durableTuiEntry = join(codingAgentDistDir, "experimental", "durable-tui", "main.js");
+
 const mainResult = await build({
 	...commonBuildOptions(),
 	entryNames: "[name]",
@@ -166,6 +173,7 @@ const mainResult = await build({
 		"cli-runtime": join(codingAgentDistDir, "cli.js"),
 		index: join(codingAgentDistDir, "index.js"),
 		"rpc-entry": join(codingAgentDistDir, "rpc-entry.js"),
+		...(existsSync(durableTuiEntry) ? { "durable-tui-runtime": durableTuiEntry } : {}),
 	},
 	outdir: bundleDir,
 	chunkNames: "chunks/[name]-[hash]",
@@ -214,6 +222,26 @@ const lazyResult = await build({
 	splitting: false,
 });
 
+// Fork layer: the durable-tui entry loads these two as jiti extensions via an
+// absolute path resolved next to itself, so they must be emitted as standalone
+// CommonJS-free ES modules beside durable-tui-runtime.js (NOT into the chunk
+// directory the OAuth lazies use). Emitted only when the durable tree was built.
+const durableExtensionEntries = ["sessions-extension", "extensions-manager"];
+if (existsSync(durableTuiEntry)) {
+	await build({
+		...commonBuildOptions(),
+		entryNames: "[name]",
+		entryPoints: Object.fromEntries(
+			durableExtensionEntries.map((name) => [
+				name,
+				join(codingAgentDistDir, "experimental", "durable-tui", `${name}.js`),
+			]),
+		),
+		outdir: bundleDir,
+		splitting: false,
+	});
+}
+
 // getCodemodeWorkerSpecifier() in config.ts spawns the codemode worker from an in-memory data: URL
 // so codemode survives an update that replaces or deletes the install (#10439). A data: URL module
 // has no file location, so the worker must not use the createRequire(import.meta.url) banner,
@@ -258,6 +286,26 @@ createRequire(import.meta.url)("./cli-runtime.js");
 writeFileSync(join(bundleDir, "cli.js"), cliLauncher);
 chmodSync(join(bundleDir, "cli.js"), 0o755);
 chmodSync(join(bundleDir, "rpc-entry.js"), 0o755);
+
+// Fork layer: same launcher shape for the durable-tui bundle when it exists,
+// so build-binaries can just compile dist/bundle/durable-tui.js.
+//
+// The launcher uses dynamic import() rather than createRequire: durable-tui's
+// graph contains top-level await, which require() rejects with
+// ERR_REQUIRE_ASYNC_MODULE. The import is deliberately not awaited — the
+// runtime module drives its own lifecycle (it awaits InteractiveMode at module
+// scope), and awaiting here would only emit an unsettled-top-level-await
+// warning once the TUI exits.
+if (existsSync(durableTuiEntry)) {
+	const durableTuiLauncher = `#!/usr/bin/env node
+import { enableCompileCache } from "node:module";
+
+enableCompileCache();
+import("./durable-tui-runtime.js");
+`;
+	writeFileSync(join(bundleDir, "durable-tui.js"), durableTuiLauncher);
+	chmodSync(join(bundleDir, "durable-tui.js"), 0o755);
+}
 
 const files = new Set(metafiles.flatMap((metafile) => Object.keys(metafile.outputs))).size + 1;
 const mib = (outputBytes(metafiles) + cliLauncher.length) / (1024 * 1024);
