@@ -14,8 +14,8 @@
 
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { isSessionDirectoryLocked } from "./lock.ts";
 import type { ExtensionAPI, ExtensionCommandContext } from "../../core/extensions/types.ts";
+import { isSessionDirectoryLocked } from "./lock.ts";
 import { tuiSessionsRoot } from "./session-location.ts";
 import { listSessions } from "./session-meta.ts";
 
@@ -23,7 +23,11 @@ const CARRIER_NAME = "carrier.jsonl";
 
 /** Pre-flight a switch target: undefined when openable, else a user message. */
 async function validateSwitchTarget(directory: string): Promise<string | undefined> {
-	if (!(await stat(join(directory, "session.sqlite")).then(() => true).catch(() => false))) {
+	if (
+		!(await stat(join(directory, "session.sqlite"))
+			.then(() => true)
+			.catch(() => false))
+	) {
 		return "That session has no database file";
 	}
 	// Probe only — never acquires, so it can never steal the lock out from
@@ -56,9 +60,7 @@ export default function sessionsExtension(pi: ExtensionAPI): void {
 			// by its durable conversation id via the session manager instead.
 			// Set by the facade through the process env (jiti instances share it).
 			const current = process.env.PI_DURABLE_SESSION_ID;
-			const sessions = (await listSessions(tuiSessionsRoot(ctx.cwd))).filter(
-				(session) => session.id !== current,
-			);
+			const sessions = (await listSessions(tuiSessionsRoot(ctx.cwd))).filter((session) => session.id !== current);
 			if (sessions.length === 0) {
 				ctx.ui.notify(current === undefined ? "No durable sessions yet" : "No other durable sessions", "info");
 				return;

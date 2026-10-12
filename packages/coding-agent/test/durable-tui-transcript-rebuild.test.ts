@@ -1,10 +1,7 @@
+import type { EntryRecord } from "@earendil-works/pi-durable";
 import { describe, expect, test } from "vitest";
 import { SessionManager } from "../src/core/session-manager.ts";
-import {
-	rebuildTranscript,
-	unwrapCompactionSummary,
-} from "../src/experimental/durable-tui/transcript-rebuild.ts";
-import type { EntryRecord } from "@earendil-works/pi-durable";
+import { rebuildTranscript, unwrapCompactionSummary } from "../src/experimental/durable-tui/transcript-rebuild.ts";
 
 /** Minimal durable EntryRecord fixture (loose fields on purpose: the branded
  * id/message types are upstream-internal; only rebuildTranscript's runtime
@@ -44,7 +41,11 @@ describe("rebuildTranscript", () => {
 			entry({ id: "e1", kind: "pi.system", model: [{ role: "system", content: [], timestamp: "" }] }),
 			entry({ id: "e2", kind: "pi.user", model: [userMessage("hello")] }),
 			entry({ id: "e3", kind: "pi.assistant", model: [assistantMessage("hi there")] }),
-			entry({ id: "e4", kind: "pi.tool-result", model: [{ role: "toolResult", content: [], toolCallId: "tc1", toolName: "bash", isError: false }] }),
+			entry({
+				id: "e4",
+				kind: "pi.tool-result",
+				model: [{ role: "toolResult", content: [], toolCallId: "tc1", toolName: "bash", isError: false }],
+			}),
 			entry({ id: "e5", kind: "pi.reset" }),
 		];
 		const rebuilt = rebuildTranscript("conv-1", "/tmp/lab", entries);
@@ -53,7 +54,10 @@ describe("rebuildTranscript", () => {
 		expect(rebuilt.stats).toEqual({ mapped: 3, skipped: 2 });
 		expect(rebuilt.fileEntries).toHaveLength(4); // header + 3
 
-		const [header, ...chain] = rebuilt.fileEntries as unknown as [Record<string, unknown>, ...Record<string, unknown>[]];
+		const [header, ...chain] = rebuilt.fileEntries as unknown as [
+			Record<string, unknown>,
+			...Record<string, unknown>[],
+		];
 		expect(header["type"]).toBe("session");
 		expect(header["id"]).toBe("conv-1");
 		expect(header["cwd"]).toBe("/tmp/lab");
@@ -85,9 +89,11 @@ describe("rebuildTranscript", () => {
 			entry({ id: "e3", kind: "pi.user", model: [userMessage("after")] }),
 		];
 		const rebuilt = rebuildTranscript("conv-1", "/tmp/lab", entries);
-		const compaction = rebuilt.fileEntries.find(
-			(item) => (item as { type?: string }).type === "compaction",
-		) as { summary: string; firstKeptEntryId: string; tokensBefore: number };
+		const compaction = rebuilt.fileEntries.find((item) => (item as { type?: string }).type === "compaction") as {
+			summary: string;
+			firstKeptEntryId: string;
+			tokensBefore: number;
+		};
 		expect(compaction.summary).toBe("The summary.");
 		expect(compaction.firstKeptEntryId).toBe("e1");
 		expect(compaction.tokensBefore).toBe(0);
@@ -108,9 +114,7 @@ describe("rebuildTranscript", () => {
 	});
 
 	test("pi.reset with a handoff message is kept as a user message", () => {
-		const entries = [
-			entry({ id: "e1", kind: "pi.reset", model: [userMessage("handoff text")] }),
-		];
+		const entries = [entry({ id: "e1", kind: "pi.reset", model: [userMessage("handoff text")] })];
 		const rebuilt = rebuildTranscript("conv-1", "/tmp/lab", entries);
 		expect(rebuilt.stats.mapped).toBe(1);
 		expect(rebuilt.fileEntries[1]!["type"]).toBe("message");

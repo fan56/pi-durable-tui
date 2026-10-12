@@ -1,12 +1,12 @@
 // durable-tui spike: session directory under an isolated prototype-marked root.
 // Same shape as ../durable/sessions.ts, but rooted at durable-tui-sessions.
 
-import { existsSync, statSync, renameSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync, renameSync, statSync } from "node:fs";
 import { mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import { lockSessionDirectory } from "./lock.ts";
 import { getAgentDir } from "../../config.ts";
+import { lockSessionDirectory } from "./lock.ts";
 
 /** One session directory holding `session.sqlite`, locked by this process. */
 export interface TuiSessionLocation {
@@ -82,7 +82,11 @@ export async function selectTuiSessionById(cwdInput: string, sessionId: string):
 		throw new Error(`durable-tui: invalid session id ${sessionId}`);
 	}
 	const directory = join(tuiSessionsRoot(cwd), sessionId);
-	if (!(await stat(directory).then(() => true).catch(() => false))) {
+	if (
+		!(await stat(directory)
+			.then(() => true)
+			.catch(() => false))
+	) {
 		throw new Error(`durable-tui: no session ${sessionId} for ${cwd}`);
 	}
 	return lockLocation(cwd, directory, false);
@@ -93,8 +97,7 @@ async function lockLocation(cwd: string, directory: string, created: boolean): P
 	try {
 		// 12 x 1s keeps the historical double-boot pacing; the lock itself is
 		// our mkdir-based one (see ./lock.ts for why proper-lockfile is out).
-		release = await lockSessionDirectory(directory, 12)
-			.then((lock) => lock.release.bind(lock));
+		release = await lockSessionDirectory(directory, 12).then((lock) => lock.release.bind(lock));
 	} catch (error) {
 		throw new Error(`Session is already open in another process: ${directory}`, { cause: error });
 	}

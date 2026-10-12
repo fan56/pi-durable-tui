@@ -17,7 +17,7 @@
 //   6. tool-loadout visibility backed by the durable registry
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AgentEvent, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import type { Conversation, EntryRecord, ModelRef, Submission, ToolRegistration } from "@earendil-works/pi-durable";
@@ -30,11 +30,11 @@ import type {
 	PromptOptions,
 	QueuedInputDisposition,
 } from "../../core/agent-session.ts";
-import { prepareCompaction } from "../../core/compaction/compaction.ts";
-import type { CompactionResult } from "../../core/compaction/compaction.ts";
-import type { ToolDefinition, ToolInfo } from "../../core/extensions/types.ts";
 import type { AgentSessionServices } from "../../core/agent-session-services.ts";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../../core/agent-session-services.ts";
+import type { CompactionResult } from "../../core/compaction/compaction.ts";
+import { prepareCompaction } from "../../core/compaction/compaction.ts";
+import type { ToolDefinition, ToolInfo } from "../../core/extensions/types.ts";
 import { SessionManager } from "../../core/session-manager.ts";
 import { sleep } from "../../utils/sleep.ts";
 import {
@@ -48,13 +48,7 @@ import { Subagent } from "../durable/subagent.ts";
 import { DurableEventAdapter } from "./event-adapter.ts";
 import { bindHeadlessInternals, type HeadlessSessionContract } from "./headless-session.ts";
 import { selectTuiSession, selectTuiSessionById } from "./session-location.ts";
-import {
-	getCurrentTuiSessionId,
-	readMeta,
-	setCurrentTuiSessionId,
-	updateMeta,
-	writeInitialMeta,
-} from "./session-meta.ts";
+import { readMeta, setCurrentTuiSessionId, updateMeta, writeInitialMeta } from "./session-meta.ts";
 import { createStableToolBridge } from "./tool-bridge.ts";
 import { rebuildTranscript } from "./transcript-rebuild.ts";
 
@@ -163,12 +157,8 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 		const resolvedAgent = await root.agent(context);
 		const modelRef: ModelRef | undefined = resolvedAgent.model ?? initial.model;
 		const model =
-			modelRef === undefined
-				? undefined
-				: services.modelRuntime.getModel(modelRef.provider, modelRef.modelId);
-		const thinkingLevel = (resolvedAgent.thinkingLevel ?? initial.thinkingLevel) as
-			| ThinkingLevel
-			| undefined;
+			modelRef === undefined ? undefined : services.modelRuntime.getModel(modelRef.provider, modelRef.modelId);
+		const thinkingLevel = (resolvedAgent.thinkingLevel ?? initial.thinkingLevel) as ThinkingLevel | undefined;
 
 		// Transcript rebuild: on resume the in-memory SessionManager starts from
 		// the durable active entries so the TUI renders history and stats/usage
@@ -268,10 +258,7 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 				summaryStart !== -1 && summaryEnd > summaryStart
 					? wrapped.slice(summaryStart + "<summary>".length, summaryEnd).trim()
 					: wrapped.trim();
-			const firstKept =
-				entry.head === undefined
-					? null
-					: (durableIdToSessionId.get(String(entry.head)) ?? null);
+			const firstKept = entry.head === undefined ? null : (durableIdToSessionId.get(String(entry.head)) ?? null);
 			const entryId = sessionManager.appendCompaction(summary, firstKept, tokensBefore);
 			durableIdToSessionId.set(String(entry.id), entryId);
 			return { summary, firstKeptEntryId: firstKept ?? "", tokensBefore };
@@ -300,8 +287,8 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 							// summary into the transcript and deliver the result.
 							const result = materializeCompaction(event.entry, 0);
 							const reason =
-								(event.entry.data as { reason?: "manual" | "threshold" | "overflow" } | undefined)
-									?.reason ?? "threshold";
+								(event.entry.data as { reason?: "manual" | "threshold" | "overflow" } | undefined)?.reason ??
+								"threshold";
 							internals.emitSessionEvent({
 								type: "compaction_end",
 								reason,
@@ -319,8 +306,7 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 						// Keep durable entry ids resolvable to session entry ids
 						// (compaction heads reference them).
 						const durable = events.find(
-							(candidate) =>
-								candidate.type === "message_end" && candidate.entry.model?.[0] === event.message,
+							(candidate) => candidate.type === "message_end" && candidate.entry.model?.[0] === event.message,
 						);
 						if (durable !== undefined) {
 							const sessionId = internals.sessionEntryIdOf(event.message);
@@ -361,10 +347,10 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 						if (!manualCompaction) {
 							internals.emitSessionEvent({ type: "compaction_start", reason: event.reason });
 						}
-				} else if (event.type === "agent_changed") {
-					// Keep the tool cache honest when the selection changes.
-					void refreshToolCacheFromRegistry();
-				}
+					} else if (event.type === "agent_changed") {
+						// Keep the tool cache honest when the selection changes.
+						void refreshToolCacheFromRegistry();
+					}
 				}
 				void deliveryContext;
 			});
@@ -391,14 +377,9 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 		const queueInput = async (text: string, behavior: "steer" | "followUp"): Promise<void> => {
 			// The parent's queue display: durable delivers the input as a user
 			// entry, whose message_start de-queues it again in the pipeline.
-			(
-				behavior === "followUp" ? internals.followUpMessages : internals.steeringMessages
-			).push(text);
+			(behavior === "followUp" ? internals.followUpMessages : internals.steeringMessages).push(text);
 			internals.emitQueueUpdate();
-			const submission = await root.submit(
-				{ type: "input", content: text, whenBusy: behavior },
-				context,
-			);
+			const submission = await root.submit({ type: "input", content: text, whenBusy: behavior }, context);
 			pendingQueuedInputs.push({ text, submission });
 			recordTitle(text);
 			await submission.wait(context);
@@ -550,10 +531,7 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 				await session.setModel(model, mutationOptions);
 				const thinking = (session.thinkingLevel ?? "off") as ModelThinkingLevel;
 				const ref: ModelRef = { provider: model.provider, modelId: model.id };
-				await root.configure(
-					{ model: ref, thinkingLevel: clampThinkingLevel(model, thinking) },
-					context,
-				);
+				await root.configure({ model: ref, thinkingLevel: clampThinkingLevel(model, thinking) }, context);
 			},
 			setThinkingLevel: (level: ThinkingLevel, mutationOptions?: ModelMutationOptions): void => {
 				session.setThinkingLevel(level, mutationOptions);
@@ -562,9 +540,7 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 			cycleThinkingLevel: (mutationOptions?: ModelMutationOptions): ThinkingLevel | undefined => {
 				const level = session.cycleThinkingLevel(mutationOptions);
 				if (level !== undefined) {
-					void root
-						.configure({ thinkingLevel: level as ModelThinkingLevel }, context)
-						.catch(() => {});
+					void root.configure({ thinkingLevel: level as ModelThinkingLevel }, context).catch(() => {});
 				}
 				return level;
 			},
@@ -651,9 +627,7 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 				if (prop === "isCompacting") return compacting || t.isCompacting;
 				if (prop in overrides) return overrides[prop as string];
 				const value = Reflect.get(t, prop, t);
-				return typeof value === "function"
-					? (value as (...args: unknown[]) => unknown).bind(t)
-					: value;
+				return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(t) : value;
 			},
 		}) as unknown as AgentSession;
 
@@ -677,9 +651,7 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 		// Recovered work from an interrupted turn continues now.
 		harness.resume();
 		const throwingRuntimeFactory = async (): Promise<never> => {
-			throw new Error(
-				"durable-tui: /new, /resume, /fork, and import are planned for v0.4 (session management)",
-			);
+			throw new Error("durable-tui: /new, /resume, /fork, and import are planned for v0.4 (session management)");
 		};
 		return {
 			session: proxy,
@@ -709,9 +681,7 @@ function contentText(message: { content?: unknown }): string {
 	return content
 		.filter(
 			(block): block is { type: "text"; text: string } =>
-				typeof block === "object" &&
-				block !== null &&
-				(block as { type?: unknown }).type === "text",
+				typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text",
 		)
 		.map((block) => block.text)
 		.join("\n");

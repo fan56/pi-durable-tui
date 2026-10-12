@@ -42,7 +42,12 @@ export async function readGlobalPackages(): Promise<PackageEntry[]> {
 		// what this setup uses.
 		if (typeof source !== "string") continue;
 		const path = isAbsolute(source) ? source : resolve(agentDir, source);
-		if (!(await stat(path).then((s) => s.isDirectory()).catch(() => false))) continue;
+		if (
+			!(await stat(path)
+				.then((s) => s.isDirectory())
+				.catch(() => false))
+		)
+			continue;
 		const name = basename(path);
 		if (entries.some((e) => e.name === name)) continue;
 		entries.push({ name, path });
@@ -67,7 +72,9 @@ export async function loadSelection(): Promise<string[] | undefined> {
 	if (raw === undefined) return undefined;
 	try {
 		const parsed = JSON.parse(raw) as { selected?: unknown };
-		return Array.isArray(parsed.selected) ? parsed.selected.filter((n): n is string => typeof n === "string") : undefined;
+		return Array.isArray(parsed.selected)
+			? parsed.selected.filter((n): n is string => typeof n === "string")
+			: undefined;
 	} catch {
 		return undefined;
 	}
@@ -82,7 +89,10 @@ export async function saveSelection(names: readonly string[]): Promise<void> {
 }
 
 /** Resolve saved names against the CURRENT package list; drops stale names. */
-export function resolveSelection(names: readonly string[], packages: readonly PackageEntry[]): {
+export function resolveSelection(
+	names: readonly string[],
+	packages: readonly PackageEntry[],
+): {
 	path: string;
 	name: string;
 }[] {

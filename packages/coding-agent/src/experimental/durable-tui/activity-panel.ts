@@ -25,9 +25,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ExtensionAPI } from "../../core/extensions/types.ts";
-import { Container, Text, truncateToWidth, wrapTextWithAnsi, type TUI } from "@earendil-works/pi-tui";
+import { Container, Text, type TUI, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { getAgentDir } from "../../config.ts";
+import type { ExtensionAPI } from "../../core/extensions/types.ts";
 import type { Theme, ThemeBg } from "../../modes/interactive/theme/theme.ts";
 
 const WIDGET_KEY = "durable-tui:activity";
@@ -145,7 +145,11 @@ function bandRows(theme: Theme, width: number): string[] {
 		const window = wrapped.slice(-rows);
 		const think = (s: string) => theme.italic(theme.fg("thinkingText", s));
 		out.push(
-			row(wrapped.length === 0 ? think(THINK_PREFIX.trim()) : think(THINK_PREFIX + (rows === 1 ? latest : window[0]!))),
+			row(
+				wrapped.length === 0
+					? think(THINK_PREFIX.trim())
+					: think(THINK_PREFIX + (rows === 1 ? latest : window[0]!)),
+			),
 		);
 		for (let i = 1; i < window.length; i++) out.push(row(think(window[i]!)));
 	} else {
@@ -196,7 +200,10 @@ function resultText(result: unknown): string {
 }
 
 /** Outcome classification shared by the panel and the transcript audit line. */
-function outcomeOf(text: string, isErrorFlag: boolean): { mark: string; fgKey: "success" | "error" | "warning"; suffix: string } {
+function outcomeOf(
+	text: string,
+	isErrorFlag: boolean,
+): { mark: string; fgKey: "success" | "error" | "warning"; suffix: string } {
 	const interrupted = /interrupt/i.test(text);
 	const aborted = /was aborted/i.test(text);
 	const errored = isErrorFlag || /\[error\]/.test(text);
@@ -209,7 +216,7 @@ function outcomeOf(text: string, isErrorFlag: boolean): { mark: string; fgKey: "
 export default function activityPanelExtension(pi: ExtensionAPI): void {
 	// The panel owns LIVE tool display; the transcript keeps only a compact
 	// completed-result audit line instead of the full duplicated block.
-	pi.registerToolRenderer((toolName, next) => ({
+	pi.registerToolRenderer((toolName, _next) => ({
 		renderShell: "self" as const,
 		renderCall: () => new Container(),
 		renderResult: (result, options, theme, context) => {

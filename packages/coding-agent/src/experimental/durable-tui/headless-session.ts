@@ -11,8 +11,8 @@
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ImageContent } from "@earendil-works/pi-ai/compat";
-import type { InputSource } from "../../core/extensions/types.ts";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.ts";
+import type { InputSource } from "../../core/extensions/types.ts";
 
 /** Input-handler result: `undefined` means an extension consumed the input. */
 export type HeadlessInputResult = { text: string; images: ImageContent[] | undefined } | undefined;
@@ -97,7 +97,7 @@ export function bindHeadlessInternals(session: AgentSession): HeadlessSessionCon
 		emitExtensionEvent: (event) => session.extensionRunner.emit(event),
 		onToolRegistryRefresh: (callback) => {
 			const holder = session as unknown as Record<string, unknown>;
-			if (Object.prototype.hasOwnProperty.call(holder, "_refreshToolRegistry")) {
+			if (Object.hasOwn(holder, "_refreshToolRegistry")) {
 				throw new Error("headless-session: onToolRegistryRefresh bound twice");
 			}
 			const prototype = Object.getPrototypeOf(session) as Record<string, unknown>;
@@ -123,13 +123,11 @@ export function bindHeadlessInternals(session: AgentSession): HeadlessSessionCon
 			if (runtime === undefined || !("sendMessage" in runtime) || !("sendUserMessage" in runtime)) {
 				return false;
 			}
-			const refuse =
-				(method: string) =>
-				(): never => {
-					throw new Error(
-						`durable-tui: pi.${method} is not supported here — the durable engine owns the conversation loop`,
-					);
-				};
+			const refuse = (method: string) => (): never => {
+				throw new Error(
+					`durable-tui: pi.${method} is not supported here — the durable engine owns the conversation loop`,
+				);
+			};
 			runtime.sendMessage = refuse("sendMessage");
 			runtime.sendUserMessage = refuse("sendUserMessage");
 			return true;

@@ -4,7 +4,8 @@
 // zero coupling to the Experimental durable API, fork-friendly. `/name`
 // persists here; `--list` reads here.
 
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TuiSessionLocation } from "./session-location.ts";
 
@@ -57,10 +58,7 @@ export async function writeInitialMeta(location: TuiSessionLocation): Promise<vo
 }
 
 /** Best-effort partial update; requires the sidecar written by writeInitialMeta. */
-export async function updateMeta(
-	directory: string,
-	change: { name?: string; title?: string },
-): Promise<void> {
+export async function updateMeta(directory: string, change: { name?: string; title?: string }): Promise<void> {
 	const existing = await readMeta(directory);
 	if (existing === undefined) return;
 	const meta: TuiSessionMeta = {
@@ -96,7 +94,7 @@ export interface TuiSessionSummary extends TuiSessionMeta {
 
 /** List sessions for one sessions root (the per-cwd directory from selectTuiSession). */
 export async function listSessions(root: string): Promise<TuiSessionSummary[]> {
-	let entries;
+	let entries: Dirent[];
 	try {
 		entries = await readdir(root, { withFileTypes: true });
 	} catch {
