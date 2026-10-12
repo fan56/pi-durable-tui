@@ -132,7 +132,10 @@ function contentTextOf(message: { content?: unknown }): string {
 	const content = message.content;
 	if (!Array.isArray(content)) return "";
 	return content
-		.filter((block): block is { type: "text"; text: string } => typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text")
+		.filter(
+			(block): block is { type: "text"; text: string } =>
+				typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text",
+		)
 		.map((block) => block.text)
 		.join("\n");
 }

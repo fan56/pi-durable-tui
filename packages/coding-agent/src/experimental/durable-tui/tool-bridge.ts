@@ -22,12 +22,12 @@
 // through the shared `arguments` reference today; durable clones before hook
 // dispatch, this degrades silently (no known consumer mutates).
 
-import { defineExtension, type Extension, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { JsonValue } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { AgentSession } from "../../core/agent-session.ts";
+import type { ExtensionToolContext, ToolCallEvent, ToolDefinition } from "../../core/extensions/types.ts";
 import { BUILTIN_PATH_PREFIX } from "../../core/source-info.ts";
-import type { ExtensionToolContext, ToolDefinition, ToolCallEvent } from "../../core/extensions/types.ts";
 
 const BRIDGE_EXTENSION_NAME = "pi-bridge-stable-tools";
 /** Builtin extensions whose tools run fine on the minimal bridge context. */
@@ -126,9 +126,7 @@ export function createStableToolBridge(options: StableToolBridgeOptions): Stable
 					}
 				}
 				if (partial.details !== undefined) {
-					void api
-						.details(toJson(partial.details), context)
-						.catch(() => undefined);
+					void api.details(toJson(partial.details), context).catch(() => undefined);
 				}
 			};
 			try {
@@ -210,12 +208,7 @@ export function createStableToolBridge(options: StableToolBridgeOptions): Stable
 function toJson(value: unknown): JsonValue {
 	if (value === undefined) return null;
 	try {
-		if (
-			value === null ||
-			typeof value === "string" ||
-			typeof value === "number" ||
-			typeof value === "boolean"
-		) {
+		if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
 			return value;
 		}
 		const parsed: unknown = JSON.parse(JSON.stringify(value));

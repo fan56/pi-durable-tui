@@ -92,8 +92,7 @@ export class DurableEventAdapter {
 				} else if (message.role === "toolResult") {
 					this.turnToolResults.push(message);
 				}
-				const normalized =
-					message.role === "user" ? normalizeUserMessage(message) : (message as AgentMessage);
+				const normalized = message.role === "user" ? normalizeUserMessage(message) : (message as AgentMessage);
 				out.push({ type: "message_end", message: normalized });
 				this.runMessages.push(normalized);
 				break;

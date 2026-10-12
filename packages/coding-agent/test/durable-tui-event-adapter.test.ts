@@ -1,6 +1,6 @@
+import type { AgentEvent as DurableEvent } from "@earendil-works/pi-durable";
 import { describe, expect, test } from "vitest";
 import { DurableEventAdapter } from "../src/experimental/durable-tui/event-adapter.ts";
-import type { AgentEvent as DurableEvent } from "@earendil-works/pi-durable";
 
 type AnyEvent = Record<string, unknown> & { type: string };
 
@@ -209,9 +209,7 @@ describe("DurableEventAdapter", () => {
 	test("message_update changes reconstruct faithful assistantMessageEvent types", () => {
 		const adapter = new DurableEventAdapter();
 		const events = translateBatches(adapter, [
-			[
-				{ type: "message_start", message: { role: "assistant", content: [], usage: undefined, timestamp: "" } },
-			],
+			[{ type: "message_start", message: { role: "assistant", content: [], usage: undefined, timestamp: "" } }],
 			[
 				{
 					type: "message_update",

@@ -11,8 +11,8 @@
 //   -h, --help              usage
 
 import { existsSync, realpathSync } from "node:fs";
-import chalk from "chalk";
 import { setCapabilityOverrides } from "@earendil-works/pi-tui";
+import chalk from "chalk";
 import {
 	AgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
