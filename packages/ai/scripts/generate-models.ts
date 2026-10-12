@@ -2881,6 +2881,13 @@ async function generateModels() {
 			});
 		}
 
+		// models.dev prices Sonnet 5.5 cache reads at 0.1; Anthropic's official
+		// pricing is 0.2. Keep the official value authoritative until models.dev
+		// catches up. https://platform.claude.com/docs/en/models/sonnet-5-5/overview
+		if (candidate.provider === "anthropic" && candidate.id === "claude-sonnet-5-5") {
+			candidate.cost = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 };
+		}
+
 		if (
 			(candidate.provider === "anthropic" ||
 				candidate.provider === "opencode" ||
