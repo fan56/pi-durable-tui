@@ -132,4 +132,4 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - `docs/research/*` 是 throwaway 调研产物，不维护时效。
 - 对上游文件的实质改动必须先在 wayfinder 开票登记（R4 约束：优先只加新文件，不改上游；`packages/durable/src/harness/**` 只经 ToolExecutionApi/HookApi 扩展）。
 - 会话数据走 `~/.pi/agent/experimental/durable-p1-sessions/`（原型隔离目录）；`~/.pi/agent` 其余内容是与正式版 pi 共享的配置，只读对待。
-- 不发 npm。origin（`fan56/pi-durable-tui`）是唯一分发渠道：`main` 随时推送到远端；正式发布走 `v*` tag（tag 必须与 `VERSION` 一致，否则 release workflow 直接失败），由 `durable-tui-release.yml` 构建 4 平台自包含 archive 并挂到 GitHub Release，用户从 Releases 页（或 clone 后 `npm ci --ignore-scripts` + `./scripts/build-durable-tui-release.sh`）安装。
+- 不发 npm。origin（`fan56/pi-durable-tui`）是唯一分发渠道：`main` 随时推送到远端；正式发布走 `v*` tag（tag 必须与 `VERSION` 一致，否则 release workflow 直接失败），由 `durable-tui-release.yml` 构建 4 平台自包含 archive 并挂到 GitHub Release，用户从 Releases 页（或 clone 后 `npm ci --ignore-scripts` + `./scripts/build-durable-tui-release.sh`）安装。上游继承的 Build Binaries 与 Nix workflow 已在 GitHub 设置层禁用（它们校验上游 1.x 版本号，对 fork 的 0.x tag 必败；见 wayfinder ticket 010）。
