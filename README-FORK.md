@@ -42,7 +42,7 @@ npm install --omit=dev
 ./pi-durable-tui
 ```
 
-That is the whole install: unpack, install three runtime packages, run.
+That is the whole install: unpack, install four runtime packages, run.
 
 ## Use
 
@@ -133,12 +133,21 @@ alongside this experiment:
 Nothing here is published to npm. Releases are GitHub Releases carrying the
 self-contained archive described above.
 
-## Building from source
+## Install from source
+
+Cloning the repo and building locally produces the same self-contained archive
+(builtin themes, interactive assets, HTML export templates, docs and examples
+included):
 
 ```bash
+git clone https://github.com/fan56/pi-durable-tui.git
+cd pi-durable-tui
 npm ci --ignore-scripts
-./scripts/build-durable-tui-release.sh          # → release/pi-durable-tui-<version>-<platform>.tar.gz
+./scripts/build-durable-tui-release.sh   # → release/pi-durable-tui-<version>-<platform>.tar.gz
 ```
+
+Then install from the archive exactly as above: unpack, `npm install
+--omit=dev`, `./pi-durable-tui`.
 
 For development against the source tree (no bundle, no packaging):
 
