@@ -158,7 +158,7 @@ import(join(here, "bundle", "durable-tui.js"));
 EOF
 chmod +x "$BUNDLE_DIR/pi-durable-tui"
 
-cp README-FORK.md "$BUNDLE_DIR/README.md"
+cp README.md "$BUNDLE_DIR/README.md"
 cp CHANGELOG.md "$BUNDLE_DIR/CHANGELOG.md" 2>/dev/null || true
 cp packages/coding-agent/CHANGELOG.md "$BUNDLE_DIR/UPSTREAM-CHANGELOG.md" 2>/dev/null || true
 cp LICENSE "$BUNDLE_DIR/LICENSE" 2>/dev/null || true

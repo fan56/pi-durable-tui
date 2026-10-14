@@ -6,6 +6,19 @@ This is a fork layer on top of [`earendil-works/pi`](https://github.com/earendil
 Upstream releases are tracked in that repository's changelog, which ships inside
 each release archive as `UPSTREAM-CHANGELOG.md`.
 
+## [Unreleased]
+
+### Changed
+
+- **The repo root README is now the project's own.** The fork's readme moved
+  from `README-FORK.md` to `README.md` (upstream pi's README is preserved
+  verbatim at `README-UPSTREAM.md`), `README-FORK.md` is removed, and the
+  release bundle ships the new root README. The flag table now matches the
+  shipped launcher — `--with-extensions` never parsed (it exits with
+  "unknown argument"); the clean-base switch is `--no-extensions`, which
+  applies the saved `/extensions` selection — and the stale
+  `deepseek/deepseek-flash` fallback note is gone.
+
 ## [0.7.1] — 2026-10-13
 
 ### Fixed

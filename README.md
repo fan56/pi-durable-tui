@@ -1,206 +1,151 @@
-<p align="center">
-  <a href="https://pi.dev">
-    <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
-  </a>
-</p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
-</p>
+# pi-durable-tui
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
+[![Release](https://img.shields.io/github/v/release/fan56/pi-durable-tui?include_prereleases&style=flat-square)](https://github.com/fan56/pi-durable-tui/releases)
+[![Upstream](https://img.shields.io/badge/fork%20of-earendil--works%2Fpi-5865F2?style=flat-square)](https://github.com/earendil-works/pi)
 
-# Pi
+> **Experimental early-access coding agent:** the stable **pi** TUI on the
+> **durable** runtime. An early taste of the official durable coding agent,
+> which is in development. It is not feature-complete, and it will change.
 
-Pi is a minimal, extensible agent harness that you can make your own.
+`pi-durable-tui` runs the **stable `pi` TUI, unmodified**, on top of the
+**durable backend** ([`@earendil-works/pi-durable`](https://www.npmjs.com/package/@earendil-works/pi-durable)
+Harness + SQLite root conversation) through a production `AgentSession` facade.
 
-Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](packages/coding-agent/docs/extensions.md), [skills](packages/coding-agent/docs/skills.md), [prompt templates](packages/coding-agent/docs/prompt-templates.md), and [themes](packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](packages/coding-agent/docs/packages.md) and share via npm or git.
+What that means in practice: the same editor, footer, commands, and extensions
+you already know — but conversations live in a durable store that survives
+crashes, interrupted tool calls, and process kills.
 
-Pi ships with powerful defaults but skips features like sub-agents and plan mode. Ask Pi to build what you want, or install a package that does it your way.
+## Why this exists
 
-Use Pi [interactively](packages/coding-agent/docs/usage.md), automate it in [print or JSON mode](packages/coding-agent/docs/cli.md), control it over [RPC](packages/coding-agent/docs/rpc.md), or build apps with the [Pi TypeScript SDK](packages/coding-agent/docs/sdk.md). See [OpenClaw](https://github.com/OpenClaw/OpenClaw) for a real-world integration.
+The upstream `pi` ships a durable runtime, but the interactive TUI still runs
+on the stable session backend. This fork wires the two together so the durable
+engine can be exercised through a real, daily-driver interface — the fastest
+way to find out what a durable coding agent should feel like.
 
-## Getting started
+It is a **fork layer**: it adds new files and a small number of narrowly-scoped
+hooks, and otherwise tracks upstream [`earendil-works/pi`](https://github.com/earendil-works/pi)
+untouched. That constraint is deliberate — it keeps upstream merges clean and
+makes it obvious what is experimental.
 
-Install the command-line interface:
+## Install
 
-```bash
-curl -fsSL https://pi.dev/install.sh | sh
-```
+Requirements: **Node ≥ 24** on **macOS or Linux** (arm64 or x64).
 
-On Windows:
+> Node is required because the durable conversation store is backed by Node's
+> built-in `node:sqlite`. [Bun does not implement that module](https://bun.sh/docs/runtime/sqlite),
+> which is also why this project ships a bundle rather than a single-file binary.
 
-```shell
-powershell -c "irm https://pi.dev/install.ps1 | iex"
-```
-
-The installer pins all dependencies and updates Pi with `pi update`. Alternatively, install directly with npm, which does not pin transitive dependencies:
-
-```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-```
-
-Pi requires Node.js 22.19 or newer. The macOS, Linux, and Windows installers can install it if needed. Pi does not require dependency lifecycle scripts for a normal npm installation.
-
-Start Pi in the directory where you want it to work:
+Download the archive for your platform from
+[Releases](https://github.com/fan56/pi-durable-tui/releases), then:
 
 ```bash
-cd /path/to/project
-pi
+tar -xzf pi-durable-tui-<version>-<platform>.tar.gz
+cd pi-durable-tui
+npm install --omit=dev
+./pi-durable-tui
 ```
 
-For a built-in AI provider, run `/login` inside Pi to connect a subscription or API key. Then give Pi a task.
+That is the whole install: unpack, install the pinned runtime packages, run.
 
-See the [documentation](https://pi.dev/docs/latest) for full setup and usage instructions, or [visit pi.dev](https://pi.dev) for demos.
-
-## Run with Nix
+## Use
 
 ```bash
-nix run github:earendil-works/pi/stable
+./pi-durable-tui                     # new session; your global-settings extensions load
+./pi-durable-tui -c                  # continue the newest session for this cwd
+./pi-durable-tui --list              # list sessions recorded for this cwd
+./pi-durable-tui --session <id>      # attach a specific session
+./pi-durable-tui -e <path>           # additionally load one extension (repeatable)
+./pi-durable-tui --no-extensions     # clean base; the saved /extensions selection applies instead
+./pi-durable-tui --provider P --model M
+./pi-durable-tui --help
 ```
 
-`stable` points at the latest release. Install it with `nix profile add github:earendil-works/pi/stable` and update with `nix profile upgrade pi`. Use a release tag such as `github:earendil-works/pi/v1.0.0` to pin a version, or `github:earendil-works/pi` for unreleased changes on `main`. Nix builds Pi from source.
+Roughly the same flags as `pi`, minus its print/JSON/RPC modes and its `/login`.
 
-Supports ARM64 and x86-64 on Linux and macOS. Use `nix build .` or `nix run .` to build or run your checkout.
+### In the TUI
 
-Nix builds are offline, so the bundled model data comes from a pi.dev model catalog revision pinned in `nix/model-catalog.json`. At runtime, Pi still overlays newer catalog data from pi.dev as usual. The Nix workflow replaces the pin on `main` when it no longer matches the checkout, for example after a provider is added or gains a new model type. To refresh it by hand:
+| Command | What it does |
+| --- | --- |
+| `/extensions` | Pick which of your globally configured extensions load at startup. Newly checked ones apply to the running session immediately; the selection persists across boots. |
+| `/sessions` | Switch to another durable session for this cwd, newest first. |
+| `/new` | Start a fresh durable session. |
+| `/model` | Switch model (takes effect on the next request). |
+| `/compact` | Manually compact the conversation. |
+
+### Credentials and state
+
+- Credentials are **shared with stable `pi`** (`~/.pi/agent/auth.json`; a stored
+  credential wins over the environment variable).
+- Sessions live under
+  `~/.pi/agent/experimental/durable-tui-sessions/<cwd-hash>/`, one directory per
+  session (`session.sqlite` + a `session.json` sidecar).
+- Startup extension selection is stored at
+  `~/.pi/agent/durable-tui-extensions.json` (override with
+  `PI_DURABLE_EXT_CONFIG`).
+- Nothing else under `~/.pi/agent` is touched.
+
+## What works
+
+Verified against a real model:
+
+- Core loop: streaming, tool calls, abort.
+- **Kill and resume.** Kill the process mid-run and restart with `-c`: the
+  transcript rebuilds, interrupted unsafe tools report `interrupted`, and
+  generation continues.
+- **Session management**: `/new`, the `/sessions` picker, `--session` attach,
+  `--list`.
+- **Startup extension selection** via `/extensions`, persisted across boots.
+- **Stable MCP reuse end-to-end.** A hand-written stdio MCP server via
+  `.pi/mcp.json` (`"exposure": "direct"`) is reachable by the model as
+  `mcp__<server>__<tool>`, with `/mcp` for status.
+- **Your existing extensions**, including UI-heavy ones such as
+  `@aiwayds/pi-powerline-footer`.
+- Steering mid-run, `/compact`, `/model` switching.
+
+## Not wired (by design, per the current phasing)
+
+- `/fork` and `/tree` — durable forks are new conversations in another store;
+  the cross-store mapping needs its own design.
+- `/resume` over stable JSONL sessions (refused with a clear error — use
+  `/sessions`).
+- Images, `/login`, prompt templates, and `/skill:name` expansion.
+- Extension `tool_result` events (stable emits those from the real tool pipeline
+  only; harmless for pure-UI extensions).
+- `tool_call` argument mutation by extension handlers (block/wait is bridged;
+  in-place `input` mutation is not).
+- MCP exposure modes other than `direct`.
+- Extension `before_agent_start` injection — engine-side prompts belong to the
+  durable `pi-prompt` extension.
+
+## Relationship to upstream
+
+This repository is a fork of [`earendil-works/pi`](https://github.com/earendil-works/pi).
+Upstream's README is preserved verbatim at
+[`README-UPSTREAM.md`](README-UPSTREAM.md); upstream packages and the release
+process are unchanged. Nothing here is published to npm — releases are GitHub
+Releases carrying the self-contained archive described above.
+
+More detail:
+
+- The experimental feature set:
+  [`packages/coding-agent/src/experimental/durable-tui/README.md`](packages/coding-agent/src/experimental/durable-tui/README.md)
+- Release history: [`CHANGELOG.md`](CHANGELOG.md)
+- Build reports and the decision map: [`docs/`](docs/), [`wayfinder/`](wayfinder/)
+
+## Building from source
 
 ```bash
-npm run update:model-catalog-pin
+npm ci --ignore-scripts
+./scripts/build-durable-tui-release.sh          # → release/pi-durable-tui-<version>-<platform>.tar.gz
 ```
 
-## Packages
-
-This monorepo contains the Pi CLI and its supporting libraries.
-
-| Package | Description |
-|---------|-------------|
-| **[@earendil-works/chord](packages/chord)** | Standalone application-composition runtime for services, replicated state, RPC, and plugins |
-| **[@earendil-works/pi-telemetry](packages/telemetry)** | Vendor-neutral telemetry contracts, reference adapter, conformance tests, and typed schemas |
-| **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@earendil-works/pi-durable](packages/durable)** | Durable conversation, task, and document runtime |
-| **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-
-For Slack/chat automation and workflows see [earendil-works/pi-chat](https://github.com/earendil-works/pi-chat).
-
-## Permissions & Containerization
-
-Pi does not include a built-in permission system for restricting filesystem, process, network, or credential access. By default, it runs with the permissions of the user and process that launched it.
-
-If you need stronger boundaries, containerize or sandbox Pi. See [packages/coding-agent/docs/containerization.md](packages/coding-agent/docs/containerization.md) for three patterns:
-
-- **Gondolin extension**: keep `pi` and provider auth on the host while routing built-in tools and `!` commands into a local Linux micro-VM.
-- **Plain Docker**: run the whole `pi` process in a local container for simple isolation.
-- **OpenShell**: run the whole `pi` process in a policy-controlled sandbox.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).  Longer term plans for Pi can also be found in [RFCs](https://rfc.earendil.com/keyword/pi/).
-
-## Development
+For development against the source tree (no bundle, no packaging):
 
 ```bash
-npm install --ignore-scripts  # Install all dependencies without running lifecycle scripts
-npm run build         # Refresh model data, then build all packages
-npm run build:offline # Rebuild using existing model data without network access
-npm run check         # Lint, format, and type check
-./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
+node --import packages/coding-agent/src/experimental/source-resolver.ts \
+  packages/coding-agent/src/experimental/durable-tui/main.ts
 ```
-
-### Using local packages outside the monorepo
-
-Build every public package into one coherent local artifact set:
-
-```bash
-npm run pack:packages -- --out .artifacts/pi-packages
-```
-
-This refreshes model data before building `pi-ai`. To avoid network access when
-model data is already hydrated, pass `--offline-model-data`.
-
-Then configure an external project to consume one package and resolve all of
-its Pi dependencies from the same artifact set. npm is the default:
-
-```bash
-node scripts/use-local-packages.mjs \
-  --manifest .artifacts/pi-packages/manifest.json \
-  --consumer ../my-project \
-  --package @earendil-works/pi-durable \
-  --package @earendil-works/pi-agent-core
-cd ../my-project
-npm install --ignore-scripts
-```
-
-For a pnpm project, point `--consumer` at the workspace root:
-
-```bash
-node scripts/use-local-packages.mjs \
-  --manifest .artifacts/pi-packages/manifest.json \
-  --consumer ../my-project \
-  --package @earendil-works/pi-agent-core \
-  --package-manager pnpm
-cd ../my-project
-pnpm install --ignore-scripts
-```
-
-Repeat `--package` for each direct dependency. The command updates the
-consumer's `package.json` with content-addressed local `file:` references. It
-writes transitive overrides to `package.json` for npm or `pnpm-workspace.yaml`
-for pnpm. Keep the artifact directory available while installing or updating
-the consumer. Re-run both commands after changing Pi source.
-
-## Building standalone binaries from release source
-
-GitHub releases include a versioned source archive covered by the release's `SHA256SUMS` file. Extract it and run the same build script used for the official standalone binaries:
-
-```bash
-VERSION="<release-version>"
-tar -xzf "pi-${VERSION}-source.tar.gz"
-cd "pi-${VERSION}"
-./scripts/build-binaries.sh --offline-model-data --platform linux-x64 --out "$PWD/out"
-```
-
-The archive includes release model data and native prebuilds. `--offline-model-data` uses that model data without refreshing provider catalogs. The script installs dependencies and builds the executable with its runtime assets; pass `--skip-install` if dependencies are already provided.
-
-## Supply-chain hardening
-
-We treat npm dependency changes as reviewed code changes.
-
-- Direct external dependencies are pinned to exact versions. Internal workspace packages remain version-ranged.
-- `.npmrc` sets `save-exact=true` and `min-release-age=2` to avoid same-day dependency releases during npm resolution.
-- `package-lock.json` is the dependency ground truth. Pre-commit blocks accidental lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1` is set.
-- `npm run check` verifies pinned direct deps, native TypeScript import compatibility, and the generated coding-agent install lock.
-- The pi.dev installer installs from `packages/coding-agent/install-lock/`, generated from the root lockfile, to pin transitive deps. The npm package does not pin transitive deps.
-- Local release smoke tests and npm publication use the same tarball packer; npm publishes the validated tarballs rather than repacking workspace directories.
-- Local release installs, documented npm installs, and `pi update --self` use `--ignore-scripts` where supported.
-- CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.
-- Install lock generation has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail checks until reviewed.
-
-## Share your OSS coding agent sessions
-
-If you use Pi or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
-
-I regularly publish my own `pi-mono` work sessions here:
-
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
 
 ## License
 
-MIT
-
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>
+MIT, as upstream. See [`LICENSE`](LICENSE).
