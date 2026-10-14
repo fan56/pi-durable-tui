@@ -7,8 +7,8 @@
 # its conversation store is backed by Node's built-in `node:sqlite`
 # (@earendil-works/pi-durable/storage/sqlite/node), which Bun does not
 # implement ("No such built-in module: node:sqlite" at runtime). The archive
-# therefore ships the esbuild bundle plus the three runtime packages the bundle
-# deliberately leaves external, and runs on stock Node.
+# therefore ships the esbuild bundle plus the runtime packages the bundle
+# leaves external or resolves from disk at runtime, and runs on stock Node.
 #
 # Usage:
 #   ./scripts/build-durable-tui-release.sh [--skip-build] [--out <dir>] [--platform <name>]
@@ -25,9 +25,13 @@
 #
 # The archive unpacks to a directory containing:
 #   pi-durable-tui        launcher (node ./bundle/durable-tui.js)
-#   bundle/               esbuild output; every dependency except the three
-#                         externals below is inlined here
-#   package.json          pins those three runtime dependencies
+#   bundle/               esbuild output; every dependency except the externals
+#                         below is inlined here
+#   dist/                 runtime assets resolved under <install>/dist by
+#                         src/config.ts helpers (builtin themes, interactive
+#                         assets, HTML export templates) plus docs/examples
+#                         referenced from the system prompt
+#   package.json          pins the runtime dependencies listed below
 #   README.md             install + usage
 #   CHANGELOG.md
 #
@@ -90,8 +94,33 @@ BUNDLE_DIR="$STAGE/pi-durable-tui"
 mkdir -p "$BUNDLE_DIR"
 cp -r packages/coding-agent/dist/bundle "$BUNDLE_DIR/bundle"
 
+# Runtime assets the bundled-node layout resolves under <install>/dist via the
+# helpers in packages/coding-agent/src/config.ts (getThemesDir,
+# getInteractiveAssetsDir, getExportTemplateDir). Mirrors upstream copy-assets,
+# but copied from src so the archive does not depend on copy-assets having run
+# for the current dist/ (--skip-build skips it). Missing theme files crash the
+# settings/theme selector with ENOENT on open.
+mkdir -p "$BUNDLE_DIR/dist/modes/interactive/theme" \
+	"$BUNDLE_DIR/dist/modes/interactive/assets" \
+	"$BUNDLE_DIR/dist/core/export-html/vendor"
+cp packages/coding-agent/src/modes/interactive/theme/*.json "$BUNDLE_DIR/dist/modes/interactive/theme/"
+cp packages/coding-agent/src/modes/interactive/assets/*.png "$BUNDLE_DIR/dist/modes/interactive/assets/"
+cp packages/coding-agent/src/core/export-html/template.html \
+	packages/coding-agent/src/core/export-html/template.css \
+	packages/coding-agent/src/core/export-html/template.js \
+	"$BUNDLE_DIR/dist/core/export-html/"
+cp packages/coding-agent/src/core/export-html/vendor/*.js "$BUNDLE_DIR/dist/core/export-html/vendor/"
+
+# Docs and examples interpolated into the system prompt (getDocsPath /
+# getExamplesPath). Every upstream distribution channel ships them (npm files
+# field, bun copy-binary-assets); the archive matches.
+cp -r packages/coding-agent/docs "$BUNDLE_DIR/docs"
+cp -r packages/coding-agent/examples "$BUNDLE_DIR/examples"
+
 # The runtime packages the bundle keeps external (see allowedExternalPackages in
-# scripts/build-coding-agent-bundle.mjs). Keep this list in sync with that set:
+# scripts/build-coding-agent-bundle.mjs) plus quickjs-wasi, whose JS is inlined
+# but whose quickjs.wasm is resolved from node_modules at codemode runtime
+# (getQuickJSWasmPath in src/config.ts). Keep this list in sync with that set:
 # shipping a missing one breaks the launch with ERR_MODULE_NOT_FOUND.
 cat > "$BUNDLE_DIR/package.json" <<EOF
 {
@@ -105,7 +134,8 @@ cat > "$BUNDLE_DIR/package.json" <<EOF
 	"dependencies": {
 		"@earendil-works/chord": "1.1.0",
 		"@silvia-odwyer/photon-node": "0.3.4",
-		"jiti": "2.7.0"
+		"jiti": "2.7.0",
+		"quickjs-wasi": "3.6.2"
 	}
 }
 EOF
@@ -128,7 +158,7 @@ import(join(here, "bundle", "durable-tui.js"));
 EOF
 chmod +x "$BUNDLE_DIR/pi-durable-tui"
 
-cp README-FORK.md "$BUNDLE_DIR/README.md"
+cp README.md "$BUNDLE_DIR/README.md"
 cp CHANGELOG.md "$BUNDLE_DIR/CHANGELOG.md" 2>/dev/null || true
 cp packages/coding-agent/CHANGELOG.md "$BUNDLE_DIR/UPSTREAM-CHANGELOG.md" 2>/dev/null || true
 cp LICENSE "$BUNDLE_DIR/LICENSE" 2>/dev/null || true
