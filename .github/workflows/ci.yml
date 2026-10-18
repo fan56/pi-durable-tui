@@ -41,6 +41,13 @@ jobs:
       - name: Build the pi-env daemon
         run: npm run build:daemon --workspace packages/env
 
+      - name: Hydrate model data
+        # The generated catalog imports packages/ai/src/providers/data/*.json,
+        # which are gitignored build products (same hydration the release
+        # pipeline runs); a clean checkout has no data files, so every test
+        # file that transitively imports models.generated.ts fails collection.
+        run: npm run hydrate:model-data
+
       - name: Test
         run: npm test
 
