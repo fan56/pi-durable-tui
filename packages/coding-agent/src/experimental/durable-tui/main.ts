@@ -20,7 +20,7 @@ import {
 } from "../../core/agent-session-runtime.ts";
 import { InteractiveMode } from "../../modes/interactive/interactive-mode.ts";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "../../modes/interactive/theme/theme.ts";
-import { validateThemeJson } from "../../modes/interactive/theme/theme-json.ts";
+import { validateThemeJson } from "../../modes/interactive/theme/theme-schema.ts";
 import { createDurableTuiSession } from "./durable-agent-session.ts";
 import { loadSelection, readGlobalPackages, resolveSelection } from "./extension-picker.ts";
 import { migrateLegacySessionsRoot, tuiSessionsRoot } from "./session-location.ts";

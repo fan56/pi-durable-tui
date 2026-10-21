@@ -137,8 +137,11 @@ export function createStableToolBridge(options: StableToolBridgeOptions): Stable
 					onUpdate as never,
 					buildToolContext(),
 				);
+				// durable 1.2.0 renamed the model-facing channel: stable's `content`
+				// becomes durable `output` (structuredOutput stays unset — these
+				// mirrored tools declare no schema).
 				return {
-					content: result.content as ToolExecutionResult<JsonValue>["content"],
+					output: result.content as ToolExecutionResult<JsonValue>["output"],
 					...(result.isError === undefined || result.isError === false ? {} : { isError: true }),
 					...(result.details === undefined ? {} : { details: toJson(result.details) }),
 					...(result.usage === undefined ? {} : { usage: result.usage }),
@@ -151,7 +154,7 @@ export function createStableToolBridge(options: StableToolBridgeOptions): Stable
 				// durable abort path stays intact.
 				if (context.abortSignal?.aborted) throw error;
 				const message = error instanceof Error ? error.message : String(error);
-				return { content: [{ type: "text", text: `Tool error: ${message}` }], isError: true };
+				return { output: [{ type: "text", text: `Tool error: ${message}` }], isError: true };
 			}
 		},
 	});

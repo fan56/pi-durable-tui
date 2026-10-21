@@ -37,18 +37,18 @@ import { prepareCompaction } from "../../core/compaction/compaction.ts";
 import type { ToolDefinition, ToolInfo } from "../../core/extensions/types.ts";
 import { SessionManager } from "../../core/session-manager.ts";
 import { sleep } from "../../utils/sleep.ts";
+import { DurableEventAdapter } from "./event-adapter.ts";
 import {
 	configureHarnessHttp,
 	createCodingRegistry,
 	createHarnessSettings,
 	ExecutionEnvs,
 	findInitialAgentModel,
-} from "../durable/harness-setup.ts";
-import { Subagent } from "../durable/subagent.ts";
-import { DurableEventAdapter } from "./event-adapter.ts";
+} from "./harness-setup.ts";
 import { bindHeadlessInternals, type HeadlessSessionContract } from "./headless-session.ts";
 import { selectTuiSession, selectTuiSessionById } from "./session-location.ts";
 import { readMeta, setCurrentTuiSessionId, updateMeta, writeInitialMeta } from "./session-meta.ts";
+import { Subagent } from "./subagent.ts";
 import { createStableToolBridge } from "./tool-bridge.ts";
 import { rebuildTranscript } from "./transcript-rebuild.ts";
 
