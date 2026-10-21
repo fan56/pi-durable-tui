@@ -42,7 +42,9 @@ describe("getSupportedThinkingLevels", () => {
 	it("includes Claude Sonnet 5.5 with managed effort levels and official pricing", () => {
 		const model = getModel("anthropic", "claude-sonnet-5-5");
 		expect(model).toMatchObject({
-			cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+			// Fork layer: the generator keeps Anthropic's official 0.2 cache-read
+			// price authoritative over models.dev's 0.1 (see generate-models.ts).
+			cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
 			contextWindow: 1_000_000,
 			maxTokens: 128_000,
 			compat: {
