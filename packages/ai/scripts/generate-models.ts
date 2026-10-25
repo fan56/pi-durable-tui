@@ -191,7 +191,6 @@ const TOGETHER_TOGGLE_REASONING_EFFORT_COMPAT: OpenAICompletionsCompat = {
 };
 const TOGETHER_REASONING_ONLY_MODELS = new Set([
 	"deepseek-ai/DeepSeek-R1",
-	"MiniMaxAI/MiniMax-M2.7",
 ]);
 const TOGETHER_REASONING_EFFORT_MODELS = new Set(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]);
 const TOGETHER_TOGGLE_REASONING_EFFORT_MODELS = new Set(["deepseek-ai/DeepSeek-V4-Pro-0813"]);
@@ -248,7 +247,6 @@ const NVIDIA_NIM_UNSUPPORTED_MODELS = new Set([
 	"meta/llama-3.2-1b-instruct",
 	"meta/llama-4-maverick-17b-128e-instruct",
 	"microsoft/phi-4-mini-instruct",
-	"minimaxai/minimax-m2.7",
 	"mistralai/mistral-nemotron",
 	"nvidia/nemotron-mini-4b-instruct",
 	"qwen/qwen3-next-80b-a3b-instruct",
