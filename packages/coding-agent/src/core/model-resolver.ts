@@ -25,13 +25,11 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
 	azure: "gpt-5.4",
 	"openai-codex": "gpt-6.1-sol",
 	radius: "balanced",
-	nvidia: "nvidia/nemotron-3-ultra-550b-a55b",
+	nvidia: "nvidia/nemotron-3.5-super-vl-120b-a12b",
 	deepseek: "deepseek-v4-pro",
 	google: "gemini-3.1-pro-preview",
 	"google-vertex": "gemini-3.1-pro-preview",
-	// gpt-5.4 left the generated github-copilot catalog; the 5.6 line replaced
-	// it (same drift fix as the xiaomi defaults below).
-	"github-copilot": "gpt-5.6-luna",
+	"github-copilot": "gpt-6.1-sol",
 	openrouter: "moonshotai/kimi-k2.6",
 	"vercel-ai-gateway": "zai/glm-5.1",
 	xai: "grok-4.7",
@@ -224,7 +222,7 @@ function resolveText(
 
 /**
  * `provider/rest` is only a hint: the whole text may also be a model id on another provider, such as
- * gateway id `zai/glm-5` or commandcode id `xiaomi/mimo-v2.5-pro`. The named provider wins when usable,
+ * gateway id `zai/glm-5` or commandcode id `xiaomi/mimo-v2.6-pro`. The named provider wins when usable,
  * since that is what the syntax usually means; otherwise a sole usable raw match wins, since the named
  * provider could not serve the request. An unusable named match is still preferred over unusable raw
  * matches, so `--api-key` can set up the named provider.
