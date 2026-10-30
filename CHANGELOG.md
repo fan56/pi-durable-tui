@@ -6,9 +6,37 @@ This is a fork layer on top of [`earendil-works/pi`](https://github.com/earendil
 Upstream releases are tracked in that repository's changelog, which ships inside
 each release archive as `UPSTREAM-CHANGELOG.md`.
 
-## [Unreleased]
+## [0.10.0] — 2026-10-30
 
 ### Changed
+
+- **Synced the upstream base to pi v1.4.0** (coding-agent 1.4.0, durable 1.4.0,
+  ai 1.4.0). The fork's own catalog-drift fixes are retired in favor of the
+  upstream ones: Xiaomi providers now default to `mimo-v2.6-pro` and
+  `github-copilot` defaults to `gpt-6.1-sol` (upstream's pick after gpt-5.4
+  left the catalog; the fork's interim `gpt-5.6-luna` default is gone).
+  Model-catalog fixtures follow the upstream 1.4.0 catalog.
+- **Upstream durable 1.4.0 migrates the SQLite conversation store to schema
+  version 2 on first open.** The migration is automatic and one-way: after a
+  session store has been opened by this release, pi-durable-tui 0.9.x and
+  earlier cannot open it. The fork's session directory locks are file locks
+  and are unaffected.
+
+### Fixed
+
+- **The release archive boots again: `activity-panel.js` was missing from
+  `bundle/`.** The durable-tui entry loads the panel as a jiti extension
+  resolved next to itself; the bundle script only emitted the other two
+  siblings (sessions-extension, extensions-manager), so every released
+  archive since 0.7.0 crashed at startup with "cannot locate the bundled
+  extension ./activity-panel.{ts,js}" (source runs were unaffected — the
+  `.ts` sibling probe hit first). The bundle script now emits all three, and
+  a comment ties its list to the `resolveSiblingExtension()` calls in
+  durable-tui/main.ts.
+- The tui package's CJK punctuation now renders bold/italic correctly
+  (upstream added `marked-cjk-friendly`, #3353).
+
+### Changed (from the accumulated [Unreleased])
 
 - **The repo root README is now the project's own.** The fork's readme moved
   from `README-FORK.md` to `README.md` (upstream pi's README is preserved

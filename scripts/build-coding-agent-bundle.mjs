@@ -217,11 +217,16 @@ const lazyResult = await build({
 	splitting: false,
 });
 
-// Fork layer: the durable-tui entry loads these two as jiti extensions via an
+// Fork layer: the durable-tui entry loads these as jiti extensions via an
 // absolute path resolved next to itself, so they must be emitted as standalone
 // CommonJS-free ES modules beside durable-tui-runtime.js (NOT into the chunk
 // directory the OAuth lazies use). Emitted only when the durable tree was built.
-const durableExtensionEntries = ["sessions-extension", "extensions-manager"];
+// The list must match every resolveSiblingExtension() call in durable-tui/main.ts.
+const durableExtensionEntries = [
+	"sessions-extension",
+	"extensions-manager",
+	"activity-panel",
+];
 if (existsSync(durableTuiEntry)) {
 	await build({
 		...commonBuildOptions(),
