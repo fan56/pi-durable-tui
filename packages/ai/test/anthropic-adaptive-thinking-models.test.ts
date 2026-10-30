@@ -12,8 +12,6 @@ const EXPECTED_CURRENT_ADAPTIVE_THINKING_MODELS = [
 	"fireworks/accounts/fireworks/models/deepseek-v4p1-flash",
 	"fireworks/accounts/fireworks/models/gpt-oss-120b",
 	"fireworks/accounts/fireworks/models/qwen3p8-max",
-	"minimax-cn/MiniMax-M3.1-Flash",
-	"minimax/MiniMax-M3.1-Flash",
 	"opencode/claude-opus-4-8",
 	"opencode/claude-opus-5",
 	"vercel-ai-gateway/anthropic/claude-opus-4.8",
