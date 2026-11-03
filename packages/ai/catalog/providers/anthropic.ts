@@ -25,6 +25,12 @@ export default defineProvider({
 			map: (model) => {
 				if (MODELS_55.has(model.id)) mergeThinking(model, claude55ThinkingLevels(model.id));
 				if (MODELS_WITH_1M_CONTEXT.has(model.id)) model.contextWindow = 1000000;
+				// Fork layer: models.dev prices Sonnet 5.5 cache reads at 0.1;
+				// Anthropic's official pricing is 0.2. Keep the official value
+				// authoritative (fork 0f82e1427, ported off the deleted v1.4
+				// generator). https://platform.claude.com/docs/en/models/sonnet-5-5/overview
+				if (model.id === "claude-sonnet-5-5")
+					model.cost = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 };
 				return model;
 			},
 		}),
