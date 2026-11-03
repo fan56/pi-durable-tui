@@ -3,9 +3,10 @@
 // AgentSession (in-memory SessionManager, real services, engine never runs) is
 // driven externally: turn-surface calls (prompt/steer/followUp/abort/compact/
 // model mutation) reroute to the durable root Conversation, and durable
-// watchEvents batches flow through the session's own pipeline via the
-// headless contract (headless-session.ts), so persistence, extension dispatch,
-// and the AgentSessionEvent fan-out all run production code.
+// conversation-view snapshots (`Conversation.watch()`, durable 1.5) flow
+// through the session's own pipeline via the headless contract
+// (headless-session.ts), so persistence, extension dispatch, and the
+// AgentSessionEvent fan-out all run production code.
 //
 // Host-surface gaps closed here (ticket 009 resolution 6):
 //   1. transcript rebuild from durable entries (transcript-rebuild.ts)
@@ -20,8 +21,17 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
-import type { Conversation, EntryRecord, ModelRef, Submission, ToolRegistration } from "@earendil-works/pi-durable";
-import { Harness, watchEvents } from "@earendil-works/pi-durable";
+import type {
+	Conversation,
+	ConversationView,
+	EntryRecord,
+	JsonObject,
+	LiveState,
+	ModelRef,
+	Submission,
+	ToolRegistration,
+} from "@earendil-works/pi-durable";
+import { Harness } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type {
 	AgentSession,
@@ -246,7 +256,7 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 
 		const adapter = new DurableEventAdapter();
 		let chain: Promise<void> = Promise.resolve();
-		const stream = await watchEvents(harness, root.id, context);
+		const watch = await root.watch(context);
 
 		/** Materialize a durable compaction entry into the session transcript. */
 		const materializeCompaction = (entry: EntryRecord, tokensBefore: number): CompactionResult => {
@@ -264,12 +274,60 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 			return { summary, firstKeptEntryId: firstKept ?? "", tokensBefore };
 		};
 
-		stream.start((events, deliveryContext) => {
-			// Batches must be handled strictly in order; ingest awaits extension
+		// Session-layer progress the AgentEvent translation does not carry:
+		// retry backoff, compaction rounds, and agent-doc changes, read from the
+		// view's documents (durable 1.5 removed the event stream that carried
+		// auto_retry_* / compaction_start / agent_changed).
+		let prevRetry: { attempt: number } | undefined;
+		let prevAgentDoc: JsonObject | undefined;
+		const seenCompactions = new Set<string>();
+		const syncSessionProgress = (view: ConversationView, live: LiveState | undefined): void => {
+			const retrySettings = services.settingsManager.getRetrySettings();
+			const retry = live?.generation?.retry;
+			if (retry !== undefined && prevRetry === undefined) {
+				const attempt = live?.generation?.attempt ?? 1;
+				prevRetry = { attempt };
+				internals.emitSessionEvent({
+					type: "auto_retry_start",
+					attempt,
+					maxAttempts: retrySettings.maxRetries,
+					delayMs: Math.max(0, retry.at - Date.now()),
+					errorMessage: retry.error,
+				});
+			} else if (retry === undefined && prevRetry !== undefined) {
+				internals.emitSessionEvent({
+					type: "auto_retry_end",
+					success: true,
+					attempt: prevRetry.attempt,
+				});
+				prevRetry = undefined;
+			}
+			for (const status of live?.compactions ?? []) {
+				const taskId = String(status.taskId);
+				if (seenCompactions.has(taskId)) continue;
+				seenCompactions.add(taskId);
+				if (!manualCompaction) {
+					internals.emitSessionEvent({ type: "compaction_start", reason: status.trigger });
+				}
+			}
+			const agentDoc = view.docs["pi.agent"];
+			if (agentDoc !== prevAgentDoc) {
+				prevAgentDoc = agentDoc;
+				// Keep the tool cache honest when the selection changes.
+				void refreshToolCacheFromRegistry();
+			}
+		};
+
+		watch.start(async (call) => {
+			if (call.kind !== "value") return;
+			const view = call.value;
+			// Views must be handled strictly in order; ingest awaits extension
 			// listeners, so a shared promise chain keeps them sequential.
 			const run = chain.then(async () => {
 				if (closed) return;
-				if (events.some((event) => event.type === "run_start")) {
+				const step = adapter.translate(view);
+				const live = (view.docs["pi.live"] ?? undefined) as LiveState | undefined;
+				if (step.events.some((event) => event.type === "agent_start")) {
 					running = true;
 					runStarts++;
 					// Cheap reconciliation: a silently-drifted stable tool set
@@ -277,17 +335,17 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 					// otherwise freeze the mirror (oldfox review #4).
 					reconcileToolBridge();
 				}
-				// Structural events the AgentEvent translation does not carry.
-				for (const event of events) {
-					if (event.type === "entry_appended" && event.entry.kind === "pi.compaction") {
+				// Structural entries the AgentEvent translation does not carry.
+				for (const entry of step.appendedEntries) {
+					if (entry.kind === "pi.compaction") {
 						if (manualCompaction) {
-							manualCompactionEntry = event.entry;
+							manualCompactionEntry = entry;
 						} else {
 							// Auto/background compaction during a run: mirror the
 							// summary into the transcript and deliver the result.
-							const result = materializeCompaction(event.entry, 0);
+							const result = materializeCompaction(entry, 0);
 							const reason =
-								(event.entry.data as { reason?: "manual" | "threshold" | "overflow" } | undefined)?.reason ??
+								(entry.data as { reason?: "manual" | "threshold" | "overflow" } | undefined)?.reason ??
 								"threshold";
 							internals.emitSessionEvent({
 								type: "compaction_end",
@@ -299,63 +357,29 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 						}
 					}
 				}
-				const translated = adapter.translate(events);
-				for (const event of translated) {
+				for (const event of step.events) {
 					await internals.ingestAgentEvent(event);
 					if (event.type === "message_end") {
 						// Keep durable entry ids resolvable to session entry ids
 						// (compaction heads reference them).
-						const durable = events.find(
-							(candidate) => candidate.type === "message_end" && candidate.entry.model?.[0] === event.message,
-						);
+						const durable = step.appendedEntries.find((candidate) => candidate.model?.[0] === event.message);
 						if (durable !== undefined) {
 							const sessionId = internals.sessionEntryIdOf(event.message);
 							if (sessionId !== undefined) {
-								durableIdToSessionId.set(
-									String((durable as { type: "message_end"; entry: EntryRecord }).entry.id),
-									sessionId,
-								);
+								durableIdToSessionId.set(String(durable.id), sessionId);
 							}
 						}
 					}
 				}
-				if (translated.some((event) => event.type === "agent_end")) {
+				if (step.events.some((event) => event.type === "agent_end")) {
 					running = false;
 					await internals.emitExtensionEvent({ type: "agent_settled", aborted: abortRequested });
 					internals.emitSessionEvent({ type: "agent_settled", aborted: abortRequested });
 					abortRequested = false;
 				}
-				// Retry and compaction progress are AgentSessionEvent-only: the
-				// session layer owns them, so emit them straight to the listeners.
-				const retrySettings = services.settingsManager.getRetrySettings();
-				for (const event of events) {
-					if (event.type === "auto_retry_start") {
-						internals.emitSessionEvent({
-							type: "auto_retry_start",
-							attempt: event.attempt,
-							maxAttempts: retrySettings.maxRetries,
-							delayMs: Math.max(0, event.at - Date.now()),
-							errorMessage: event.errorMessage,
-						});
-					} else if (event.type === "auto_retry_end") {
-						internals.emitSessionEvent({
-							type: "auto_retry_end",
-							success: true,
-							attempt: event.attempt,
-						});
-					} else if (event.type === "compaction_start") {
-						if (!manualCompaction) {
-							internals.emitSessionEvent({ type: "compaction_start", reason: event.reason });
-						}
-					} else if (event.type === "agent_changed") {
-						// Keep the tool cache honest when the selection changes.
-						void refreshToolCacheFromRegistry();
-					}
-				}
-				void deliveryContext;
+				syncSessionProgress(view, live);
 			});
 			chain = run.catch((error) => console.error("[durable-tui] event ingestion failed:", error));
-			return chain;
 		});
 
 		const recordTitle = (text: string): void => {
@@ -635,7 +659,7 @@ export async function createDurableTuiSession(options: DurableTuiSessionOptions)
 			if (closed) return;
 			closed = true;
 			for (const step of [
-				() => stream.stop(),
+				() => watch.stop(),
 				() => harness.close(context),
 				() => envs.cleanup(context),
 				() => location.release(),
