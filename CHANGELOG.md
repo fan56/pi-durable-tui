@@ -6,6 +6,62 @@ This is a fork layer on top of [`earendil-works/pi`](https://github.com/earendil
 Upstream releases are tracked in that repository's changelog, which ships inside
 each release archive as `UPSTREAM-CHANGELOG.md`.
 
+## [0.11.0] — 2026-11-03
+
+### Changed
+
+- **Synced the upstream base to pi v1.5.0** (coding-agent 1.5.0, durable 1.5.0,
+  ai 1.5.0). Highlights from upstream: tool argument validation moved from
+  TypeBox to `pi-schema`, so plain JSON Schema tools (including MCP tools) now
+  get the same coercion TypeBox tools had, while TypeBox-only features
+  (`Type.Refine()`, `Type.BigInt()`, codecs, custom formats) no longer apply
+  to tool arguments and validation failures list pi-schema's messages;
+  GPT-6.1 Terra is available through OpenAI, Azure OpenAI Responses, and
+  Codex; the built-in model catalog moved to the models.dev v2 pipeline, so
+  realtime and image-only models are no longer offered as chat models;
+  extension packages can show their changelog on the next fresh launch after
+  an update, condensed by the `collapseChangelog` setting; streaming renders
+  faster — large tool calls are parsed incrementally and code-heavy answers
+  and tool rows reuse highlighting and rendered Markdown; `pi.exec()` gained
+  a `maxBuffer` option and a `truncated` result field; and `undici` was
+  updated to 8.12.3 for security advisories.
+- **The durable-tui event adapter was rebuilt on conversation-view snapshot
+  diffing.** Upstream durable 1.5.0 removed the event stream layer
+  (`watchEvents` and its AgentEvent types, spec §9.4): renderers watch state
+  via `Conversation.watch()`. The pi-agent-core AgentEvents the stable
+  session pipeline consumes are now re-derived by diffing successive
+  ConversationView snapshots — transcript entry appends become
+  message_start/message_end, `pi.live.generation.message` becomes the
+  streamed message_start/message_update partials, `pi.live.tools` slots
+  become tool_execution_start/update/end, and runs frame as
+  agent_start/agent_end. A recovered run is adopted into the first snapshot
+  so abort/settle keep working, and it reports `agent_start` immediately.
+- **Turn boundaries are now inferred.** Upstream emits no explicit turn
+  events, so the adapter closes a turn at assistant/user transcript
+  boundaries instead of a dedicated turn marker.
+- **Entries persisted while the agent is idle no longer emit `message_end`
+  to the TUI event surface.** Persistence is unaffected — only what live
+  event listeners see changes.
+
+### Fixed
+
+- **Zhipu/Z.ai usage-limit errors (code `1308`) are no longer retried
+  automatically.** They were treated as transient HTTP 429 errors, causing
+  retries that cannot succeed until the usage cap resets.
+- **`tool_search` (and codemode `searchTools()`) now matches Chinese,
+  Japanese, Thai, and other non-ASCII queries.** The tokenizer kept only
+  ASCII letters and digits, so such queries found nothing; words in any
+  script now match, and space-less text such as `搜索记录` is split into
+  words.
+- **Sonnet 5.5 keeps Anthropic's official 0.2 cache-read price** in the
+  models.dev v2 catalog pipeline, where models.dev lists 0.1 — the fork's
+  earlier price override is ported into the catalog's Anthropic provider map
+  step.
+- The subagent extension's tool parameter schema imports `Type` from
+  `typebox` directly, since pi-ai 1.5.0 no longer re-exports TypeBox; a
+  TypeBox schema is plain JSON Schema, which durable 1.5's `defineTool`
+  takes.
+
 ## [0.10.0] — 2026-10-30
 
 ### Changed
