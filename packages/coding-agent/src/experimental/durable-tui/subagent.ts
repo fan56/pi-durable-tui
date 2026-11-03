@@ -1,8 +1,10 @@
 // durable-tui fork layer: moved from src/experimental/durable/ when upstream
 // removed that directory (v1.3.0 line); the durable subagent tool rides along
 // with the fork's registry setup. Ported to durable 1.2.0 results (output).
+// Tool parameters stay TypeBox (pi-ai no longer re-exports Type in 1.5.0; a
+// TypeBox schema is plain JSON Schema, which defineTool takes since 1.5.0).
 import type { Context } from "@earendil-works/chord";
-import { type AssistantMessage, Type } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantEntry,
 	configure,
@@ -12,6 +14,7 @@ import {
 	type Extension,
 	type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 
 async function answerText(api: ToolExecutionApi, answer: EntryId, context: Context): Promise<string> {
 	const entry = await api.commit((tx) => tx.entry(AssistantEntry, answer), context);
