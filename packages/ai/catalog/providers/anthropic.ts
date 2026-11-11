@@ -1,5 +1,5 @@
 import type { Model } from "../../src/types.ts";
-import { defineProvider, mergeCompat, mergeThinking, modelsDevModels, withInputLimits } from "../define.ts";
+import { addMissing, defineProvider, mergeCompat, mergeThinking, modelsDevModels, withInputLimits } from "../define.ts";
 import {
 	claude55ThinkingLevels,
 	enableClaudeMidConvoEffort,
@@ -10,30 +10,49 @@ import {
 // Models the API may fall back to, with the price the caller is billed.
 const ALLOWED_FALLBACK_MODELS: Record<string, string[]> = {
 	"claude-fable-5": ["claude-opus-4-8", "claude-opus-5"],
+	"claude-fable-5-2": ["claude-opus-4-8", "claude-opus-5"],
 	"claude-opus-5": ["claude-opus-4-8"],
 };
 
 const MODELS_WITH_1M_CONTEXT = new Set(["claude-opus-4-6", "claude-sonnet-4-6"]);
 const MODELS_55 = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
 
+// Released 2026-11-09; models.dev does not list it for Anthropic yet.
+// https://platform.claude.com/docs/en/models/fable-5-2/whats-new-fable-5-2
+const CLAUDE_FABLE_5_2: Model<"anthropic-messages"> = {
+	id: "claude-fable-5-2",
+	name: "Claude Fable 5.2",
+	api: "anthropic-messages",
+	baseUrl: "https://api.anthropic.com",
+	provider: "anthropic",
+	reasoning: true,
+	input: ["text", "image"],
+	cost: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
+	contextWindow: 1000000,
+	maxTokens: 128000,
+};
+
 export default defineProvider({
 	id: "anthropic",
 	models: (ctx) =>
-		modelsDevModels(ctx, "anthropic", {
-			api: "anthropic-messages",
-			baseUrl: "https://api.anthropic.com",
-			map: (model) => {
-				if (MODELS_55.has(model.id)) mergeThinking(model, claude55ThinkingLevels(model.id));
-				if (MODELS_WITH_1M_CONTEXT.has(model.id)) model.contextWindow = 1000000;
-				// Fork layer: models.dev prices Sonnet 5.5 cache reads at 0.1;
-				// Anthropic's official pricing is 0.2. Keep the official value
-				// authoritative (fork 0f82e1427, ported off the deleted v1.4
-				// generator). https://platform.claude.com/docs/en/models/sonnet-5-5/overview
-				if (model.id === "claude-sonnet-5-5")
-					model.cost = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 };
-				return model;
-			},
-		}),
+		addMissing(
+			modelsDevModels(ctx, "anthropic", {
+				api: "anthropic-messages",
+				baseUrl: "https://api.anthropic.com",
+				map: (model) => {
+					if (MODELS_55.has(model.id)) mergeThinking(model, claude55ThinkingLevels(model.id));
+					if (MODELS_WITH_1M_CONTEXT.has(model.id)) model.contextWindow = 1000000;
+					// Fork layer: models.dev prices Sonnet 5.5 cache reads at 0.1;
+					// Anthropic's official pricing is 0.2. Keep the official value
+					// authoritative (fork 0f82e1427, ported off the deleted v1.4
+					// generator). https://platform.claude.com/docs/en/models/sonnet-5-5/overview
+					if (model.id === "claude-sonnet-5-5")
+						model.cost = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 };
+					return model;
+				},
+			}),
+			[CLAUDE_FABLE_5_2],
+		),
 	finalize: (model) => {
 		if (model.api !== "anthropic-messages") return;
 		const messagesModel = model as Model<"anthropic-messages">;
