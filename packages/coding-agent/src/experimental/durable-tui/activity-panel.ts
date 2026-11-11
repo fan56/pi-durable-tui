@@ -23,18 +23,28 @@
 // streams (isPartial) and a one-line ✓/✗/⚡ audit when it completes, so
 // history keeps a trail but the chat never shows the block twice.
 //
-// The same applies to thinking: with `hideThinkingBlock`, the transcript
+// The same applies to thinking: with `hideThinkingBlock: true`, the transcript
 // renders a one-line "Thinking..." placeholder that would sit right next to
 // the panel's band (7 rows + 1 row on screen at once) and stay in history
 // forever. While the panel is enabled it owns thinking display, so the
 // placeholder label is blanked (an empty label renders no rows at all);
 // disabling the panel restores the stock placeholder.
+//
+// With `hideThinkingBlock: false` the user wants the NATIVE thinking block:
+// the transcript streams the full markdown thinking while the model thinks, so
+// the panel yields the whole viewport during thinking phases (and the
+// thinking→tool bridge) — thinking then has exactly one display. The fixed
+// geometry and the thinking_end bridge only matter while the panel is
+// VISIBLE, so yielding renders zero rows and the tool phase (🔧 band, its
+// done band, the 1s reply hide gate) is unaffected. The setting is re-read
+// when a thinking phase starts, so a live toggle takes effect next phase.
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Container, Text, type TUI, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { getAgentDir } from "../../config.ts";
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
+import { SettingsManager } from "../../core/settings-manager.ts";
 import type { Theme, ThemeBg } from "../../modes/interactive/theme/theme.ts";
 
 const WIDGET_KEY = "durable-tui:activity";
@@ -64,6 +74,9 @@ let doneFgKey: "success" | "error" | "warning" = "success";
 let doneSuffix = "";
 let hideTimer: ReturnType<typeof setTimeout> | undefined;
 let elapsedTicker: ReturnType<typeof setInterval> | undefined;
+// Whether the transcript renders thinking natively (hideThinkingBlock: false);
+// refreshed per thinking phase from the same settings files the host reads.
+let nativeThinkingVisible = false;
 
 function requestRender(): void {
 	tui?.requestRender();
@@ -137,10 +150,16 @@ function bandBgKey(): ThemeBg {
  */
 function bandRows(theme: Theme, width: number): string[] {
 	if (mode === "idle" || !enabled) return [];
+
+	const showingTool = mode === "tool" || (mode === "done" && doneFrom === "tool");
+	// The transcript owns thinking display when it renders thinking blocks
+	// natively (hideThinkingBlock: false): yield the whole viewport so thinking
+	// is never on screen twice. Tool phases keep the panel.
+	if (!showingTool && nativeThinkingVisible) return [];
+
 	const row = (s: string) => theme.bg(bandBgKey(), truncateToWidth(s, width, "…", true));
 	const out: string[] = [];
 
-	const showingTool = mode === "tool" || (mode === "done" && doneFrom === "tool");
 	const body = showingTool ? toolOutput : thinkText;
 	const tail = body.length > MAX_RETAINED_CHARS ? body.slice(-MAX_RETAINED_CHARS) : body;
 	const wrapped = tail.trim() === "" ? [] : wrapTextWithAnsi(tail, Math.max(1, width));
@@ -226,6 +245,18 @@ function applyTranscriptThinkingVisibility(ctx: { ui: { setHiddenThinkingLabel(l
 	ctx.ui.setHiddenThinkingLabel(enabled ? "" : undefined);
 }
 
+/** Re-read hideThinkingBlock from the same global settings files the host
+ * uses; a live toggle (settings UI) saves to disk immediately, so refreshing
+ * when a thinking phase starts keeps the yield decision current. On any read
+ * failure keep the panel-owned behavior (treat thinking as hidden). */
+function refreshNativeThinkingVisible(cwd: string): void {
+	try {
+		nativeThinkingVisible = !SettingsManager.create(cwd, getAgentDir()).getHideThinkingBlock();
+	} catch {
+		nativeThinkingVisible = false;
+	}
+}
+
 export default function activityPanelExtension(pi: ExtensionAPI): void {
 	// The panel owns LIVE tool display; the transcript keeps only a compact
 	// completed-result audit line instead of the full duplicated block.
@@ -261,6 +292,7 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 			};
 		});
 		applyTranscriptThinkingVisibility(ctx);
+		refreshNativeThinkingVisible(ctx.cwd);
 		void loadConfig().then(() => applyTranscriptThinkingVisibility(ctx));
 	});
 
@@ -286,6 +318,7 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 				.map((part) => part.thinking ?? "")
 				.join("\n")
 				.slice(-MAX_RETAINED_CHARS);
+			if (mode !== "thinking") refreshNativeThinkingVisible(ctx.cwd);
 			clearHideTimer();
 			mode = "thinking";
 			requestRender();
