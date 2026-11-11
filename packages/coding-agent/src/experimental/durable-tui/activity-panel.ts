@@ -44,7 +44,6 @@ import { join } from "node:path";
 import { Container, Text, type TUI, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { getAgentDir } from "../../config.ts";
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
-import { SettingsManager } from "../../core/settings-manager.ts";
 import type { Theme, ThemeBg } from "../../modes/interactive/theme/theme.ts";
 
 const WIDGET_KEY = "durable-tui:activity";
@@ -75,7 +74,7 @@ let doneSuffix = "";
 let hideTimer: ReturnType<typeof setTimeout> | undefined;
 let elapsedTicker: ReturnType<typeof setInterval> | undefined;
 // Whether the transcript renders thinking natively (hideThinkingBlock: false);
-// refreshed per thinking phase from the same settings files the host reads.
+// refreshed per thinking phase from the host's effective settings.
 let nativeThinkingVisible = false;
 
 function requestRender(): void {
@@ -245,13 +244,16 @@ function applyTranscriptThinkingVisibility(ctx: { ui: { setHiddenThinkingLabel(l
 	ctx.ui.setHiddenThinkingLabel(enabled ? "" : undefined);
 }
 
-/** Re-read hideThinkingBlock from the same global settings files the host
- * uses; a live toggle (settings UI) saves to disk immediately, so refreshing
- * when a thinking phase starts keeps the yield decision current. On any read
- * failure keep the panel-owned behavior (treat thinking as hidden). */
-function refreshNativeThinkingVisible(cwd: string): void {
+/** Re-read hideThinkingBlock from the HOST's effective settings (global and
+ * project merged, honoring the real project-trust decision — building our own
+ * SettingsManager here would default projectTrusted to true and diverge from
+ * the host on untrusted projects); a live toggle (settings UI) saves to disk
+ * immediately, so refreshing when a thinking phase starts keeps the yield
+ * decision current. On any read failure keep the panel-owned behavior
+ * (treat thinking as hidden). */
+function refreshNativeThinkingVisible(pi: ExtensionAPI): void {
 	try {
-		nativeThinkingVisible = !SettingsManager.create(cwd, getAgentDir()).getHideThinkingBlock();
+		nativeThinkingVisible = !(pi.getSettings().hideThinkingBlock ?? false);
 	} catch {
 		nativeThinkingVisible = false;
 	}
@@ -292,7 +294,7 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 			};
 		});
 		applyTranscriptThinkingVisibility(ctx);
-		refreshNativeThinkingVisible(ctx.cwd);
+		refreshNativeThinkingVisible(pi);
 		void loadConfig().then(() => applyTranscriptThinkingVisibility(ctx));
 	});
 
@@ -318,7 +320,7 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 				.map((part) => part.thinking ?? "")
 				.join("\n")
 				.slice(-MAX_RETAINED_CHARS);
-			if (mode !== "thinking") refreshNativeThinkingVisible(ctx.cwd);
+			if (mode !== "thinking") refreshNativeThinkingVisible(pi);
 			clearHideTimer();
 			mode = "thinking";
 			requestRender();
