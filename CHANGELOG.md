@@ -6,6 +6,37 @@ This is a fork layer on top of [`earendil-works/pi`](https://github.com/earendil
 Upstream releases are tracked in that repository's changelog, which ships inside
 each release archive as `UPSTREAM-CHANGELOG.md`.
 
+## [0.12.1] — 2026-11-11
+
+### Fixed
+
+- **`/import` no longer crashes when the current session is in-memory**
+  (`--no-session`, or a durable session that has never been written to disk).
+  The import used to fall back to an empty session directory (`mkdir ''` →
+  ENOENT); it now resolves the cwd's default session store — the same
+  directory `SessionManager.create` uses, honoring `PI_CODING_AGENT_DIR` — and
+  the imported session lands there.
+- **The think display is single even with `hideThinkingBlock: false`.** The
+  activity panel used to keep rendering its 🧠 band next to the transcript's
+  native expanded thinking block. During thinking phases (and the
+  thinking→tool bridge) the panel now yields the whole viewport so the native
+  block is the only thinking display; tool phases keep the panel, and the
+  setting is re-read on entry into each thinking phase, so a live toggle takes
+  effect on the next phase.
+- **The activity panel reads the host's effective settings instead of its own
+  settings-file pass.** Building a private `SettingsManager` defaulted
+  `projectTrusted` to true and could diverge from the host's real project-trust
+  decision — on an untrusted project with a project-level
+  `hideThinkingBlock: true`, the double display above could resurface. The
+  panel now reads `pi.getSettings()`, the same merged view the host runs on.
+  A committed regression test covers the yield path (yield vs panel-owned vs
+  per-phase refresh timing).
+
+### Changed
+
+- Dropped the daily `schedule:` trigger from the `durable-tui-ci` workflow; it
+  runs on push, pull request, and manual dispatch only.
+
 ## [0.12.0] — 2026-11-11
 
 ### Changed
