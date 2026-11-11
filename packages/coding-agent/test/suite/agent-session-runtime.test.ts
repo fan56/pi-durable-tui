@@ -12,7 +12,7 @@ import {
 } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { MissingSessionCwdError } from "../../src/core/session-cwd.ts";
-import { SessionManager } from "../../src/core/session-manager.ts";
+import { getDefaultSessionDir, SessionManager } from "../../src/core/session-manager.ts";
 import type {
 	AgentToolResult,
 	ExtensionAPI,
@@ -40,7 +40,12 @@ describe("AgentSessionRuntime characterization", () => {
 
 	async function createRuntimeForTest(
 		extensionFactory: ExtensionFactory,
-		options?: { cwd?: string; bootstrapModel?: boolean; bootstrapThinkingLevel?: boolean },
+		options?: {
+			cwd?: string;
+			bootstrapModel?: boolean;
+			bootstrapThinkingLevel?: boolean;
+			inMemory?: boolean;
+		},
 	) {
 		const tempDir =
 			options?.cwd ?? join(tmpdir(), `pi-runtime-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -108,7 +113,7 @@ describe("AgentSessionRuntime characterization", () => {
 		const runtime = await createAgentSessionRuntime(createRuntime, {
 			cwd: tempDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.create(tempDir),
+			sessionManager: options?.inMemory ? SessionManager.inMemory(tempDir) : SessionManager.create(tempDir),
 		});
 		await runtime.session.bindExtensions({});
 
@@ -237,6 +242,47 @@ describe("AgentSessionRuntime characterization", () => {
 		await runtime.importFromJsonl(importPath, tempDir);
 		expect(runtime.session.sessionFile).toBe(join(sessionDir, "orphan.jsonl"));
 		expect(existsSync(join(sessionDir, "orphan-1.jsonl"))).toBe(false);
+	});
+
+	// An in-memory session has no session dir (''); /import used to crash with
+	// `mkdir ''` (ENOENT). The copy must land in the cwd's default session dir.
+	it("imports into the default session dir when the current session is in-memory", async () => {
+		// Redirect the agent dir so the fallback's default session store is a
+		// temp dir, never the real ~/.pi/agent.
+		const agentDir = join(tmpdir(), `pi-runtime-suite-agent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(agentDir, { recursive: true });
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		cleanups.push(async () => {
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			if (existsSync(agentDir)) rmSync(agentDir, { recursive: true, force: true });
+		});
+
+		const { runtime, tempDir } = await createRuntimeForTest(() => {}, { inMemory: true });
+		expect(runtime.session.sessionManager.getSessionDir()).toBe("");
+
+		const importPath = join(tempDir, "import", "orphan.jsonl");
+		mkdirSync(join(tempDir, "import"), { recursive: true });
+		writeFileSync(
+			importPath,
+			`${JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "orphan",
+				timestamp: new Date().toISOString(),
+				cwd: tempDir,
+			})}\n`,
+		);
+
+		await runtime.importFromJsonl(importPath);
+
+		// The import is persisted under the cwd's default session dir and the
+		// runtime switched onto it.
+		const expectedDir = getDefaultSessionDir(tempDir);
+		expect(runtime.session.sessionManager.getSessionDir()).toBe(expectedDir);
+		expect(runtime.session.sessionFile).toBe(join(expectedDir, "orphan.jsonl"));
+		expect(existsSync(join(expectedDir, "orphan.jsonl"))).toBe(true);
 	});
 
 	it("preserves an existing session when importing a file with the same name", async () => {

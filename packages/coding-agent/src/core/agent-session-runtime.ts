@@ -12,7 +12,7 @@ import type {
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
-import { SessionManager } from "./session-manager.ts";
+import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 
 /**
  * Result returned by runtime creation.
@@ -362,7 +362,13 @@ export class AgentSessionRuntime {
 			throw new SessionImportFileNotFoundError(resolvedPath);
 		}
 
-		const sessionDir = this.session.sessionManager.getSessionDir();
+		// An in-memory session has no session dir (''): the import's copy still
+		// needs a home, so fall back to the cwd's default session dir (what
+		// SessionManager.create would pick). mkdir '' would crash with ENOENT.
+		// Hosts that cannot serve a plain-file session (durable-tui) refuse the
+		// switch at session_before_switch below, before any file is written.
+		const currentSessionDir = this.session.sessionManager.getSessionDir();
+		const sessionDir = currentSessionDir === "" ? getDefaultSessionDir(this.cwd) : currentSessionDir;
 		if (!existsSync(sessionDir)) {
 			mkdirSync(sessionDir, { recursive: true });
 		}
