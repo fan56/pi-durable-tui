@@ -226,6 +226,7 @@ const durableExtensionEntries = [
 	"sessions-extension",
 	"extensions-manager",
 	"activity-panel",
+	"session-guard",
 ];
 if (existsSync(durableTuiEntry)) {
 	await build({

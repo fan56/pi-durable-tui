@@ -191,6 +191,7 @@ const sessionFlags = {
 		resolveSiblingExtension("./sessions-extension"),
 		resolveSiblingExtension("./extensions-manager"),
 		resolveSiblingExtension("./activity-panel"),
+		resolveSiblingExtension("./session-guard"),
 	],
 };
 const tui = await createDurableTuiSession({
