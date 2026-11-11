@@ -4,18 +4,14 @@
 # and does the release archive still assemble and launch? Upstream's own ci.yml
 # covers the upstream packages; this workflow only adds what the fork changes.
 #
-# The schedule exists to catch upstream drift: this fork's durable-tui reaches
-# into pi internals, so an upstream release can break the build without any
-# commit here.
+# Trigger policy (2026-11-10): CI runs on push/PR only — no scheduled drift
+# runs; upstream drift is caught when a sync actually lands.
 name: CI
 
 on:
   push:
     branches: [main, 'feat/**', 'fix/**']
   pull_request:
-  schedule:
-    # Daily 04:40 UTC — upstream pi drift shows up here before a release does.
-    - cron: '40 4 * * *'
   workflow_dispatch:
 
 permissions:
