@@ -1,7 +1,7 @@
 // durable-tui fork layer: moved verbatim from src/experimental/durable/ when
 // upstream removed that directory (v1.3.0 line); only the durable-tui entry
 // consumes it. Relative import depth is unchanged.
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	createRegistry,

@@ -3,7 +3,7 @@
 // with the fork's registry setup. Ported to durable 1.2.0 results (output).
 // Tool parameters stay TypeBox (pi-ai no longer re-exports Type in 1.5.0; a
 // TypeBox schema is plain JSON Schema, which defineTool takes since 1.5.0).
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantEntry,

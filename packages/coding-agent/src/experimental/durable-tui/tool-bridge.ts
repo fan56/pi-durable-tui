@@ -22,7 +22,7 @@
 // through the shared `arguments` reference today; durable clones before hook
 // dispatch, this degrades silently (no known consumer mutates).
 
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
 import { defineExtension, type Extension, type Registry, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { AgentSession } from "../../core/agent-session.ts";
