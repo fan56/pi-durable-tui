@@ -71,6 +71,14 @@ if [[ "$OUTPUT_DIR" != /* ]]; then
     OUTPUT_DIR="$(pwd)/$OUTPUT_DIR"
 fi
 
+# FOOTGUN (hit on the v0.12.1 local run, 2026-11-11): the default
+# SKIP_BUILD=false path runs `npm run build`, whose tsconfig.build.json
+# excludes src/experimental — so dist/experimental is never recompiled and
+# stays stale (tsc does not clean dist). build-coding-agent-bundle.mjs then
+# bundles whatever durable-tui output is already sitting in dist/experimental
+# into the archive. Reliable sequence: run the build gate first, then package
+# with --skip-build — that branch recompiles src/experimental and rebuilds the
+# bundle from fresh output.
 if [[ "$SKIP_BUILD" == "false" ]]; then
     echo "==> Building all workspace packages..."
     npm run build
