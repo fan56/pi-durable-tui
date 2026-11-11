@@ -132,7 +132,6 @@ cat > "$BUNDLE_DIR/package.json" <<EOF
 	"license": "MIT",
 	"engines": { "node": ">=24.0.0" },
 	"dependencies": {
-		"@earendil-works/chord": "1.1.0",
 		"@silvia-odwyer/photon-node": "0.3.4",
 		"jiti": "2.7.0",
 		"quickjs-wasi": "3.6.2"
