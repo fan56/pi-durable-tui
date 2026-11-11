@@ -6,6 +6,42 @@ This is a fork layer on top of [`earendil-works/pi`](https://github.com/earendil
 Upstream releases are tracked in that repository's changelog, which ships inside
 each release archive as `UPSTREAM-CHANGELOG.md`.
 
+## [0.12.0] — 2026-11-11
+
+### Changed
+
+- **Synced the upstream base to pi v1.5.2** (coding-agent 1.5.2, durable 1.5.2,
+  ai 1.5.2). The upstream change that reaches this fork most directly: a session
+  whose original folder no longer exists now offers `Continue`, `Fork`, or
+  `Cancel` instead of only continuing. `Continue` runs the session in the current
+  directory without storing the choice; `Fork` is refused here (see Fixed) and
+  leaves the current session untouched.
+- **The coding-agent package now declares its chord dependencies at the v2
+  subpaths** (`@earendil-works/chord/context`, `@earendil-works/chord/json`), and
+  `@earendil-works/pi-durable` and `@earendil-works/chord` are pinned exactly at
+  `1.5.2`. The generated install-lock is regenerated to match.
+- **The release archive no longer pins the dead `@earendil-works/chord@1.1.0`
+  entry.** It was unreachable from the bundle but could make a mirror-default
+  install fail; the archive manifest now lists only the three public runtime
+  dependencies.
+
+### Fixed
+
+- **The thinking panel no longer shows twice.** While the activity panel is
+  enabled it is the only thinking view: the transcript's collapsed one-line
+  "Thinking..." placeholder is suppressed, so a run shows the panel's rows and
+  nothing else, and no placeholder is left in history after the turn settles.
+  `/activity off` and session shutdown restore the stock placeholder. With
+  `hideThinkingBlock` off, the transcript's expanded thinking block is unaffected.
+- **Forks and cross-store session switches are refused before the live session
+  is torn down.** Upstream tears the current session down first and lets the
+  runtime factory refuse afterwards, which killed the process for `/fork` and
+  left the TUI bound to a dead session for extension switches. The new guard
+  cancels at `session_before_fork` / `session_before_switch` and reports
+  "fork is not supported yet (planned) — staying in the current session"; picking
+  `Fork` in the missing-folder prompt behaves the same way and keeps the open
+  session usable.
+
 ## [0.11.0] — 2026-11-03
 
 ### Changed
