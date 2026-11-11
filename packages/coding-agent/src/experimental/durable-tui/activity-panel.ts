@@ -22,6 +22,13 @@
 // it: registerToolRenderer rerenders every tool with an empty shell while it
 // streams (isPartial) and a one-line ✓/✗/⚡ audit when it completes, so
 // history keeps a trail but the chat never shows the block twice.
+//
+// The same applies to thinking: with `hideThinkingBlock`, the transcript
+// renders a one-line "Thinking..." placeholder that would sit right next to
+// the panel's band (7 rows + 1 row on screen at once) and stay in history
+// forever. While the panel is enabled it owns thinking display, so the
+// placeholder label is blanked (an empty label renders no rows at all);
+// disabling the panel restores the stock placeholder.
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -213,6 +220,12 @@ function outcomeOf(
 	return { mark: errored ? "✗" : "✓", fgKey: errored ? "error" : "success", suffix: "" };
 }
 
+/** The panel is the only thinking view while enabled: blank the transcript's
+ * collapsed "Thinking..." placeholder (empty label renders no rows). */
+function applyTranscriptThinkingVisibility(ctx: { ui: { setHiddenThinkingLabel(label?: string): void } }): void {
+	ctx.ui.setHiddenThinkingLabel(enabled ? "" : undefined);
+}
+
 export default function activityPanelExtension(pi: ExtensionAPI): void {
 	// The panel owns LIVE tool display; the transcript keeps only a compact
 	// completed-result audit line instead of the full duplicated block.
@@ -232,7 +245,6 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx?.mode !== "tui") return;
-		void loadConfig();
 		reset();
 		ctx.ui.setWidget(WIDGET_KEY, (t, theme) => {
 			tui = t;
@@ -248,6 +260,8 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 				},
 			};
 		});
+		applyTranscriptThinkingVisibility(ctx);
+		void loadConfig().then(() => applyTranscriptThinkingVisibility(ctx));
 	});
 
 	pi.on("message_update", (event, ctx) => {
@@ -337,6 +351,7 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", (_event, ctx) => {
 		if (ctx?.mode !== "tui") return;
 		ctx.ui.setWidget(WIDGET_KEY, undefined);
+		ctx.ui.setHiddenThinkingLabel(undefined);
 		tui = undefined;
 		reset();
 	});
@@ -360,6 +375,7 @@ export default function activityPanelExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify(`未知参数 "${raw}"。用法 /activity [1|3|5|7|off]`, "warning");
 				return;
 			}
+			applyTranscriptThinkingVisibility(ctx);
 			await saveConfig();
 			ctx.ui.notify(`活动面板: ${enabled ? `${rows} 行` : "off"}`, "info");
 		},
